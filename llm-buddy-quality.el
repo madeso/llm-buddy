@@ -133,8 +133,7 @@ CHANGES and FORMATTED-DIFF are the inputs sent to the LLM."
               :diff formatted-diff
               :responses nil
               :tool-events nil
-              :notes nil
-              :messages nil)))
+              :notes nil)))
 
 (defun llm-buddy-quality--advice-response (_key response)
   "Capture an LLM RESPONSE from the current advice call."
@@ -164,18 +163,12 @@ CHANGES and FORMATTED-DIFF are the inputs sent to the LLM."
                           :line (plist-get event :line)
                           :message (plist-get event :note))
                     (plist-get llm-buddy-quality--current-call :notes)))))
-      ("show_message"
-       (setq llm-buddy-quality--current-call
-             (plist-put
-              llm-buddy-quality--current-call
-              :messages
-              (cons (plist-get event :message)
-                    (plist-get llm-buddy-quality--current-call :messages))))))))
+      (_ nil))))
 
 (defun llm-buddy-quality--advice-done ()
   "Finish and persist the current captured advice call."
   (when llm-buddy-quality--current-call
-    (dolist (prop '(:responses :tool-events :notes :messages))
+    (dolist (prop '(:responses :tool-events :notes))
       (setq llm-buddy-quality--current-call
             (plist-put llm-buddy-quality--current-call
                        prop
@@ -295,18 +288,15 @@ DEFAULT-MODE is used when the buffer header cannot be parsed."
      (t
       (insert "  not yet judged\n")))
     (insert "\nActual llm-buddy results:\n")
-    (let ((notes (llm-buddy-quality--filtered-notes llm-buddy-quality--judge-case item))
-          (messages (plist-get llm-buddy-quality--judge-case :messages)))
-      (if (or notes messages)
+    (let ((notes (llm-buddy-quality--filtered-notes llm-buddy-quality--judge-case item)))
+      (if notes
           (progn
             (dolist (note notes)
               (insert (format "  note %s:%s: %s\n"
                               (or (plist-get note :buffer) "?")
                               (or (plist-get note :line) "?")
-                              (plist-get note :message))))
-            (dolist (message messages)
-              (insert (format "  message: %s\n" message))))
-        (insert "  no warnings or messages\n")))
+                              (plist-get note :message)))))
+        (insert "  no warnings\n")))
     (insert "\nDiff:\n\n")
     (insert (or (plist-get item :diff) ""))
     (goto-char (point-min))))
@@ -375,8 +365,7 @@ Expected judgments:
 %S
 
 Actual llm-buddy results:
-notes: %S
-messages: %S"
+notes: %S"
           (or (plist-get case :mode) 'unknown)
           (string-limit (or (plist-get case :diff) "") 4000)
           (mapcar (lambda (item)
@@ -384,8 +373,7 @@ messages: %S"
                           :mode (plist-get item :mode)
                           :judgment (plist-get item :judgment)))
                   items)
-          (plist-get case :notes)
-          (plist-get case :messages)))
+          (plist-get case :notes)))
 
 (defun llm-buddy-quality--sanitize-filename (name)
   "Return NAME as a lowercase dash-separated basename."

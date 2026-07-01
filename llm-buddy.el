@@ -296,7 +296,6 @@ This compatibility function is not interactive; use
             (>= (float-time (time-subtract (current-time)
                                            llm-buddy--auto-last-run))
                 llm-buddy-auto-interval))
-    (message "llm-buddy auto checking for changes")
     (setq llm-buddy--auto-last-run (current-time))
     (llm-buddy-advice)))
 
@@ -690,21 +689,6 @@ The overlay is removed when the user edits the annotated line."
                :result result))
         result)))))
 
-(defun llm-buddy--show-message (message)
-  "Show MESSAGE to the user in a popup buffer."
-  (let ((buffer (get-buffer-create "*LLM Buddy Message*")))
-    (with-current-buffer buffer
-      (goto-char (point-max))
-      (insert "\n\n" message)
-      (display-buffer buffer 'display-buffer-pop-up-window))
-    (let ((result "Message shown to user."))
-      (run-hook-with-args
-       'llm-buddy-advice-tool-functions
-       (list :tool "show_message"
-             :message message
-             :result result))
-      result)))
-
 (defun llm-buddy--note-modification-hook (ov _after &rest _args)
   "Remove overlay OV when its line is modified."
   (when (overlayp ov)
@@ -786,13 +770,6 @@ the base name (e.g. uniquified names), return a message listing them."
    :description "Remove one of your previous active notes by note_id.  This dismisses the visible Emacs overlay but keeps the note in history as dismissed."
    :args '((:name "note_id" :type integer :description "The note_id from the previous notes list." :required t))))
 
-(defconst llm-buddy-tool-message
-  (make-llm-tool
-   :function #'llm-buddy--show-message
-   :name "show_message"
-   :description "Show a message to the user in a popup buffer."
-   :args '((:name "message" :type string :description "The message to show the user." :required t))))
-
 (defconst llm-buddy-tool-end
   (make-llm-tool
    :function (lambda () "Conversation ended.")
@@ -832,7 +809,7 @@ Only note real problems, not hypothetical ones.  So, for example, note that ther
 
 You have access to tools that allow you to read buffers.  The diffs you receive are in unified diff format, with @@ headers showing line numbers.  Diff context and added lines are prefixed with the current buffer line number to use with add_note.  Lines prefixed with \"old\" are removed text and are not in the current buffer; do not add notes for problems that only appear in old removed text.  Use the read_buffer tool if you need more context around a change.
 
-To make a note about part of the code, call the add_note tool with the buffer name and line number.  It will result in an Emacs buffer overlay with your note on it.  The tool result includes the note_id.  If an active previous note is no longer useful, call remove_note with its note_id.  Or, you can call show_message to show a message to the user.  You can do this as many times as you need to.  When there is nothing left to say, call the end tool.
+To make a note about part of the code, call the add_note tool with the buffer name and line number.  It will result in an Emacs buffer overlay with your note on it.  The tool result includes the note_id.  If an active previous note is no longer useful, or any previous note seems no longer relevant, call remove_note with its note_id.  You can add or remove notes as many times as you need to.  When there is nothing left to say, call the end tool.
 
 The current review is scoped to either the current project or the current non-project buffer.  Only add notes to buffers shown in this review scope.
 
@@ -887,8 +864,7 @@ ITERATIONS-LEFT bounds the tool-use loop."
 May not do anything, if there is nothing worth remarking about.  Will
 only offer corrections or suggestions.
 
-The output is either displayed in a temporary buffer, or added as
-overlay text in the relevant buffer, or both, depending on the need."
+The output is added as overlay text in the relevant buffer."
   (interactive)
   (unless llm-buddy--advice-running
     (let* ((scope (llm-buddy--scope))
@@ -900,11 +876,8 @@ overlay text in the relevant buffer, or both, depending on the need."
            (diff-formatted (llm-buddy-format-diff changes))
            (formatted (concat diff-formatted (llm-buddy--format-notes key))))
       (cond
-       ((null changes)
-        (message "llm-buddy checked: no changed tracked buffers in %s"
-                 (plist-get scope :description)))
+       ((null changes) t)
        ((string-empty-p diff-formatted)
-        (message "llm-buddy checked: no net diff to review")
         (puthash key reviewed-through llm-buddy--last-advice-times)
         (setq llm-buddy--last-advice-time reviewed-through))
        (t
@@ -919,14 +892,8 @@ overlay text in the relevant buffer, or both, depending on the need."
                         :tools (list llm-buddy-tool-read-buffer
                                      llm-buddy-tool-note
                                      llm-buddy-tool-remove-note
-                                     llm-buddy-tool-message
                                      llm-buddy-tool-end)
                         :tool-options (make-llm-tool-options :tool-choice 'any))))
-          (message "llm-buddy checking %d change%s across %d buffer%s"
-                   (length changes)
-                   (if (= (length changes) 1) "" "s")
-                   (length buffers)
-                   (if (= (length buffers) 1) "" "s"))
           (run-hook-with-args
            'llm-buddy-advice-start-functions key changes formatted)
           (setq llm-buddy--active-advice-scope-key key)

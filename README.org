@@ -2,8 +2,7 @@
 
 llm-buddy is an Emacs package that watches your recent buffer edits and asks an
 LLM to review them.  When it finds something worth pointing out, it can add a
-short inline note in the relevant buffer or show a message in a popup buffer (it
-usually does the former).
+short inline note in the relevant buffer.
 
 The goal is lightweight feedback while you work: typos, logic mistakes,
 questionable edits, or prose issues that a normal compiler, linter, or spell
