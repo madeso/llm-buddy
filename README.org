@@ -57,8 +57,6 @@ You can also run one review manually:
 * Main commands
 
 - ~llm-buddy-global-mode~ enables or disables global tracking and idle review.
-- ~llm-buddy-auto-start~ starts automatic review.
-- ~llm-buddy-auto-stop~ stops automatic review.
 - ~llm-buddy-advice~ reviews the current scope's recent changes now.
 - ~llm-buddy-clear-history~ clears recorded change history.
 - ~llm-buddy-dismiss-note~ dismisses the llm-buddy note on the current line.

@@ -239,7 +239,7 @@ func readConfig() string {
                 (funcall mode)
               (error (text-mode)))
             (erase-buffer)
-            (llm-buddy-enable)
+            (llm-buddy--record-changes)
             (llm-buddy-clear-history)
             (insert content)
             ;; Trigger advice

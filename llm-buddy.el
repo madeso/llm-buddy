@@ -272,18 +272,6 @@ Return non-nil on success."
     (with-current-buffer buffer
       (llm-buddy--stop-recording-current-buffer))))
 
-(defun llm-buddy-enable ()
-  "Begin recording buffer changes.
-This compatibility function is not interactive; use
-`llm-buddy-global-mode' to enable llm-buddy."
-  (llm-buddy--record-changes))
-
-(defun llm-buddy-disable ()
-  "Stop recording buffer changes.
-This compatibility function is not interactive; use
-`llm-buddy-global-mode' to disable llm-buddy."
-  (llm-buddy--stop-recording-changes))
-
 (defvar llm-buddy--auto-timer nil
   "Idle timer for automatic advice, or nil when not running.")
 
@@ -330,19 +318,6 @@ them automatically on idle."
         (llm-buddy--start-auto-timer))
     (llm-buddy--stop-auto-timer)
     (llm-buddy--stop-recording-changes)))
-
-;;;###autoload
-(defun llm-buddy-auto-start ()
-  "Start running `llm-buddy-advice' automatically on idle.
-Also enables change tracking if not already active."
-  (interactive)
-  (llm-buddy-global-mode 1))
-
-;;;###autoload
-(defun llm-buddy-auto-stop ()
-  "Stop automatic advice runs."
-  (interactive)
-  (llm-buddy-global-mode 0))
 
 (defun llm-buddy-clear-history ()
   "Erase recorded change history."
