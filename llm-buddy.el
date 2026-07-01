@@ -278,6 +278,9 @@ Return non-nil on success."
 (defvar llm-buddy--auto-last-run nil
   "Time of the last automatic advice run, or nil.")
 
+(defvar llm-buddy--note-review-timers (make-hash-table :test 'equal)
+  "Hash table mapping scope keys to pending note review idle timers.")
+
 (defun llm-buddy--auto-maybe-run ()
   "Run `llm-buddy-advice' if enough time has elapsed since the last run."
   (when (or (null llm-buddy--auto-last-run)
@@ -302,6 +305,10 @@ Return non-nil on success."
   (when llm-buddy--auto-timer
     (cancel-timer llm-buddy--auto-timer)
     (setq llm-buddy--auto-timer nil))
+  (maphash (lambda (_key timer)
+             (cancel-timer timer))
+           llm-buddy--note-review-timers)
+  (clrhash llm-buddy--note-review-timers)
   (message "llm-buddy stopped"))
 
 ;;;###autoload
@@ -540,6 +547,40 @@ REASON describes what dismissed the note."
      (equal (llm-buddy--note-scope-key note) scope-key))
    llm-buddy--notes))
 
+(defun llm-buddy--set-note-overlay-text (ov note)
+  "Set OV's visible note text to NOTE."
+  (overlay-put ov 'after-string
+               (propertize (concat " " note)
+                           'face 'llm-buddy-note-face)))
+
+(defun llm-buddy--clear-reviewed-note-flags (scope-key reviewed-through)
+  "Clear edited-note review flags in SCOPE-KEY through REVIEWED-THROUGH."
+  (dolist (note (llm-buddy--notes-for-scope scope-key))
+    (when (and (eq (plist-get note :status) 'active)
+               (plist-get note :review-needed)
+               (not (time-less-p reviewed-through
+                                 (plist-get note :edited-time))))
+      (setf (plist-get note :review-needed) nil))))
+
+(defun llm-buddy--note-review-callback (scope-key buffer)
+  "Run advice for SCOPE-KEY in BUFFER after the user stops typing."
+  (remhash scope-key llm-buddy--note-review-timers)
+  (when (buffer-live-p buffer)
+    (if llm-buddy--advice-running
+        (llm-buddy--schedule-note-review scope-key buffer)
+      (with-current-buffer buffer
+        (llm-buddy-advice)))))
+
+(defun llm-buddy--schedule-note-review (scope-key buffer)
+  "Schedule an idle advice run for SCOPE-KEY in BUFFER."
+  (when-let* ((timer (gethash scope-key llm-buddy--note-review-timers)))
+    (cancel-timer timer))
+  (puthash scope-key
+           (run-with-idle-timer
+            llm-buddy-auto-idle-delay nil
+            #'llm-buddy--note-review-callback scope-key buffer)
+           llm-buddy--note-review-timers))
+
 (defun llm-buddy--format-notes (&optional scope-key)
   "Return a string describing previous notes in SCOPE-KEY for the agent.
 When SCOPE-KEY is nil, use the current buffer's scope."
@@ -558,10 +599,13 @@ When SCOPE-KEY is nil, use the current buffer's scope."
                     (plist-get note :buffer)
                     (llm-buddy--note-line note)
                     (plist-get note :note)
-                    (if (eq status 'dismissed)
-                        (format " (dismissed: %s)"
-                                (or (plist-get note :dismissed-reason) "unknown"))
-                      ""))))
+                    (cond
+                     ((eq status 'dismissed)
+                      (format " (dismissed: %s)"
+                              (or (plist-get note :dismissed-reason) "unknown")))
+                     ((plist-get note :review-needed)
+                      " (the annotated line changed since this note was added or updated; decide whether to remove_note or update_note)")
+                     (t "")))))
         notes
         "\n")))))
 
@@ -585,7 +629,8 @@ suggestion string instead."
 
 (defun llm-buddy--add-note (buffer-name line-number note)
   "Add a note overlay in BUFFER-NAME at LINE-NUMBER with text NOTE.
-The overlay is removed when the user edits the annotated line."
+When the user edits the annotated line, the note remains visible and
+is reviewed again after idle time."
   (let* ((buf (llm-buddy--find-buffer buffer-name))
          (line-num (if (stringp line-number)
                        (string-to-number line-number)
@@ -618,12 +663,13 @@ The overlay is removed when the user edits the annotated line."
                                    :line line-num
                                    :note note
                                    :time (current-time)
+                                   :updated-time nil
+                                   :edited-time nil
+                                   :review-needed nil
                                    :overlay ov)))
                 (setq llm-buddy--next-note-id (1+ llm-buddy--next-note-id))
                 ;; We want the overlay to stay in line with the text noted.
-                (overlay-put ov 'after-string
-                             (propertize (concat " " note)
-                                         'face 'llm-buddy-note-face))
+                (llm-buddy--set-note-overlay-text ov note)
                 (overlay-put ov 'llm-buddy-note t)
                 (overlay-put ov 'llm-buddy-note-record record)
                 (overlay-put ov 'modification-hooks
@@ -646,6 +692,32 @@ The overlay is removed when the user edits the annotated line."
                          :result result))
                   result)))))))))
 
+(defun llm-buddy--update-note (note-id note)
+  "Replace the text of active NOTE-ID with NOTE."
+  (let ((record (llm-buddy--find-note note-id
+                                      llm-buddy--active-advice-scope-key)))
+    (cond
+     ((null record)
+      (format "Note not found: %s" note-id))
+     ((eq (plist-get record :status) 'dismissed)
+      (format "Note %d is dismissed and cannot be updated."
+              (plist-get record :id)))
+     (t
+      (setf (plist-get record :note) note)
+      (setf (plist-get record :updated-time) (current-time))
+      (setf (plist-get record :review-needed) nil)
+      (when-let* ((ov (plist-get record :overlay)))
+        (when (overlayp ov)
+          (llm-buddy--set-note-overlay-text ov note)))
+      (let ((result (format "Note %d updated." (plist-get record :id))))
+        (run-hook-with-args
+         'llm-buddy-advice-tool-functions
+         (list :tool "update_note"
+               :note-id (plist-get record :id)
+               :note note
+               :result result))
+        result)))))
+
 (defun llm-buddy--remove-note (note-id)
   "Remove the active note NOTE-ID, keeping dismissed note history."
   (let ((note (llm-buddy--find-note note-id llm-buddy--active-advice-scope-key)))
@@ -664,13 +736,18 @@ The overlay is removed when the user edits the annotated line."
                :result result))
         result)))))
 
-(defun llm-buddy--note-modification-hook (ov _after &rest _args)
-  "Remove overlay OV when its line is modified."
-  (when (overlayp ov)
-    (if-let* ((note (overlay-get ov 'llm-buddy-note-record)))
-        (llm-buddy--dismiss-note-record note "line edited")
-      (setq llm-buddy--note-overlays (delq ov llm-buddy--note-overlays))
-      (delete-overlay ov))))
+(defun llm-buddy--note-modification-hook (ov after &rest _args)
+  "Mark OV's note for review after its line is modified."
+  (when (and after (overlayp ov))
+    (when-let* ((note (overlay-get ov 'llm-buddy-note-record))
+                (buf (overlay-buffer ov)))
+      (setf (plist-get note :edited-time) (current-time))
+      (setf (plist-get note :line)
+            (with-current-buffer buf
+              (line-number-at-pos (overlay-start ov))))
+      (setf (plist-get note :review-needed) t)
+      (llm-buddy--schedule-note-review
+       (llm-buddy--note-scope-key note) buf))))
 
 (defun llm-buddy-dismiss-note ()
   "Remove the llm-buddy note overlay on the current line, if any."
@@ -745,6 +822,14 @@ the base name (e.g. uniquified names), return a message listing them."
    :description "Remove one of your previous active notes by note_id.  This dismisses the visible Emacs overlay but keeps the note in history as dismissed."
    :args '((:name "note_id" :type integer :description "The note_id from the previous notes list." :required t))))
 
+(defconst llm-buddy-tool-update-note
+  (make-llm-tool
+   :function #'llm-buddy--update-note
+   :name "update_note"
+   :description "Update the text of one of your previous active notes by note_id.  Use this when an edited line still has a problem, but the existing note is no longer accurate."
+   :args '((:name "note_id" :type integer :description "The note_id from the previous notes list." :required t)
+           (:name "note" :type string :description "The replacement note text.  It should be short, just a brief sentence." :required t))))
+
 (defconst llm-buddy-tool-end
   (make-llm-tool
    :function (lambda () "Conversation ended.")
@@ -784,7 +869,7 @@ Only note real problems, not hypothetical ones.  So, for example, note that ther
 
 You have access to tools that allow you to read buffers.  The diffs you receive are in unified diff format, with @@ headers showing line numbers.  Diff context and added lines are prefixed with the current buffer line number to use with add_note.  Lines prefixed with \"old\" are removed text and are not in the current buffer; do not add notes for problems that only appear in old removed text.  Use the read_buffer tool if you need more context around a change.
 
-To make a note about part of the code, call the add_note tool with the buffer name and line number.  It will result in an Emacs buffer overlay with your note on it.  The tool result includes the note_id.  If an active previous note is no longer useful, or any previous note seems no longer relevant, call remove_note with its note_id.  You can add or remove notes as many times as you need to.  When there is nothing left to say, call the end tool.
+To make a note about part of the code, call the add_note tool with the buffer name and line number.  It will result in an Emacs buffer overlay with your note on it.  The tool result includes the note_id.  If an active previous note is no longer useful, or any previous note seems no longer relevant, call remove_note with its note_id.  If an active previous note is still useful but its text is no longer accurate, call update_note with its note_id and replacement note text.  Previous notes can be marked to show that the annotated line changed since the note was added or updated; for those notes, use the diff and read_buffer as needed to decide whether the note should be removed, updated, or left alone.  You can add, update, or remove notes as many times as you need to.  When there is nothing left to say, call the end tool.
 
 The current review is scoped to either the current project or the current non-project buffer.  Only add notes to buffers shown in this review scope.
 
@@ -800,6 +885,8 @@ time were reviewed successfully."
   (when reviewed-through
     (setq llm-buddy--last-advice-time reviewed-through)
     (when llm-buddy--active-advice-scope-key
+      (llm-buddy--clear-reviewed-note-flags
+       llm-buddy--active-advice-scope-key reviewed-through)
       (puthash llm-buddy--active-advice-scope-key reviewed-through
                llm-buddy--last-advice-times)))
   (setq llm-buddy--active-advice-scope-key nil)
@@ -867,6 +954,7 @@ The output is added as overlay text in the relevant buffer."
                         :tools (list llm-buddy-tool-read-buffer
                                      llm-buddy-tool-note
                                      llm-buddy-tool-remove-note
+                                     llm-buddy-tool-update-note
                                      llm-buddy-tool-end)
                         :tool-options (make-llm-tool-options :tool-choice 'any))))
           (run-hook-with-args

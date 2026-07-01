@@ -25,8 +25,10 @@ formats the net change as a numbered unified diff.  On idle, or when you call
 ~llm-buddy-advice~, it sends that diff to the configured provider from the
 ~llm~ package.
 
-Inline note overlays are dismissed automatically when the annotated line is
-edited, or manually with ~llm-buddy-dismiss-note~ and ~llm-buddy-dismiss-notes~.
+Inline note overlays stay visible when the annotated line is edited.  After
+idle time, llm-buddy asks the LLM to review the changed line and either leave
+the note alone, update it, or remove it.  Notes can also be dismissed manually
+with ~llm-buddy-dismiss-note~ and ~llm-buddy-dismiss-notes~.
 
 * Setup
 
