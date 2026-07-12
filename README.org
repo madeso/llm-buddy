@@ -58,7 +58,7 @@ You can also run one review manually:
 #+end_src
 
 * Configuring noted problem severity, and fixes
-Detected problems are assigned a severity, one of =trivial=, =significant= or =critical=.  You can set the minimum severity that will get a note by configuring ~llm-buddy-detect-minimum~, setting it to one of the symbols.  By default, it is set to =significant=, which should mean that problems are noted that affect whatever you are trying to do, where as setting it to =trivial= may get typos and whitespace issues flagged as well.
+Detected problems are assigned a severity, one of =trivial=, =significant= or =critical=.  You can set the minimum severity that will get a note by configuring ~llm-buddy-detect-minimum~, setting it to one of the symbols.  By default, it is set to =significant=, which should mean that problems are noted that affect whatever you are trying to do, whereas setting it to =trivial= may get typos and whitespace issues flagged as well.
 
 Problems that are below the ~llm-buddy-detect-minimum~ value can be fixed by setting ~llm-buddy-fix-unreported~ to a non-=nil= value.  If possible, the LLM will attempt to fix issues.  These fixes happen in the background when the user is idle for ~llm-buddy-fix-idle-delay~ seconds (default =3= seconds), and are not messaged to the user.  There are a variety of reasons why the fix may not happen, such as the text being changed after the problem detection.  Think of these fixes as something that might happen but aren't guaranteed to happen.
 

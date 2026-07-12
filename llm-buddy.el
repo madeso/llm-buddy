@@ -76,7 +76,7 @@ This bounds provider or prompt failures where the model never calls the
   :group 'llm-buddy)
 
 (defconst llm-buddy--severities '(trivial significant critical)
-  "List of severities, in order of increase severity.")
+  "List of severities, in order of increasing severity.")
 
 (defun llm-buddy--severity-to-idx (severity)
   "Convert SEVERITY symbol to an index."
@@ -819,13 +819,20 @@ we will attempt to fix it if `llm-buddy-fix-unreported' is non-nil."
          (line-num (if (stringp line-number)
                        (string-to-number line-number)
                      line-number))
-         (severity-symbol (intern severity))
+         (severity-symbol (cond
+                           ((symbolp severity) severity)
+                           ((stringp severity) (intern-soft severity))))
          (severity-idx (llm-buddy--severity-to-idx severity-symbol))
          (min-severity-idx (llm-buddy--severity-to-idx llm-buddy-detect-minimum)))
     (cond ((stringp buf) buf)
+          ((null severity-idx)
+           (format "Cannot add note because severity %S is invalid." severity))
+          ((null min-severity-idx)
+           (format "Cannot add note because `llm-buddy-detect-minimum' is invalid: %S."
+                   llm-buddy-detect-minimum))
           ((< severity-idx min-severity-idx)
            (if llm-buddy-fix-unreported
-               (llm-buddy--attempt-fix buffer-name line-number note)
+               (llm-buddy--attempt-fix buffer-name line-num note)
              "Ignoring error with severity below the user's set threshold value"))
           (t (with-current-buffer buf
                (let* ((scope (llm-buddy--scope))
