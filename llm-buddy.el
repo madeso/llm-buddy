@@ -619,34 +619,34 @@ and MODE is the buffer's major mode when the problem was detected."
            (set-marker beg-marker nil)
            (set-marker end-marker nil))
          (replace-content
-          (new-content)
-          (cond
-           (applied "Fix was already applied.")
-           ((not (and (buffer-live-p buffer)
-                      (marker-buffer beg-marker)
-                      (marker-buffer end-marker)))
-            "Fix skipped because the target buffer is no longer available.")
-           ((not (equal original-content
-                        (with-current-buffer buffer
-                          (buffer-substring-no-properties
-                           beg-marker end-marker))))
-           "Fix skipped because the content changed while the fix was generated.")
-           (t
-            (with-current-buffer buffer
-              (save-excursion
-                (atomic-change-group
-                  (delete-region beg-marker end-marker)
-                  (goto-char beg-marker)
-                  (insert new-content))))
-            (setq applied t)
-            "Fix applied."))))
+           (new-content)
+           (cond
+            (applied "Fix was already applied.")
+            ((not (and (buffer-live-p buffer)
+                       (marker-buffer beg-marker)
+                       (marker-buffer end-marker)))
+             "Fix skipped because the target buffer is no longer available.")
+            ((not (equal original-content
+                         (with-current-buffer buffer
+                           (buffer-substring-no-properties
+                            beg-marker end-marker))))
+             "Fix skipped because the content changed while the fix was generated.")
+            (t
+             (with-current-buffer buffer
+               (save-excursion
+                 (atomic-change-group
+                   (delete-region beg-marker end-marker)
+                   (goto-char beg-marker)
+                   (insert new-content))))
+             (setq applied t)
+             "Fix applied."))))
       (let ((tool
              (make-llm-tool
               :function #'replace-content
               :name "replace_content"
               :description "Replace the supplied content with a corrected version."
               :args '((:name "new_content" :type string :required t
-                       :description "The corrected replacement content.")))))
+                             :description "The corrected replacement content.")))))
         (condition-case err
             (llm-chat-async
              llm-buddy-provider
@@ -1013,7 +1013,7 @@ the base name (e.g. uniquified names), return a message listing them."
    :args '((:name "buffer" :type string :description "Name of the buffer to annotate." :required t)
            (:name "line_number" :type integer :description "Line number to annotate." :required t)
            (:name "note" :type string :description "The content of the note to add.  Should be a suggestion or comment about something the user should look at." :required t)
-           (:name "severity" :type string :enum '("trivial" "significant" "critical") :required t
+           (:name "severity" :type string :enum ["trivial" "significant" "critical"] :required t
                   :description "The severity of the problem.
 This can be one of the following values:
   - Trivial: things like typos or whitespace that do not have any significant effect on what the user is doing (such as a typo in a comment).  Or something that may not quite be best practice, but is fine.
