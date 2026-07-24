@@ -639,6 +639,7 @@ and MODE is the buffer's major mode when the problem was detected."
                    (goto-char beg-marker)
                    (insert new-content))))
              (setq applied t)
+             (message "Fix applied in buffer: %s based on note: %s" (buffer-name buffer) note)
              "Fix applied."))))
       (let ((tool
              (make-llm-tool
@@ -1016,8 +1017,8 @@ the base name (e.g. uniquified names), return a message listing them."
            (:name "severity" :type string :enum ["trivial" "significant" "critical"] :required t
                   :description "The severity of the problem.
 This can be one of the following values:
-  - Trivial: things like typos or whitespace that do not have any significant effect on what the user is doing (such as a typo in a comment).  Or something that may not quite be best practice, but is fine.
-  - Significant: things that will affect what the user is doing.  A typo in a variable name, or a sentence that doesn't make sense in an email.  A bug that will cause the program to misbehave.  An incorrect fact in a document.
+  - Trivial: things like typos or whitespace that do not have any significant effect on what the user is doing (such as a typo in a comment).  Or something that may not quite be best practice, but is fine.  Or a phrasing that is a bit off.
+  - Significant: things that will affect what the user is doing.  A typo in a variable name, or a sentence that can't be made sense of in an email.  A bug that will cause the program to misbehave.  An incorrect fact in a document.
   - Critical: things that are extremely important and represent a significant failure.  A security problem, an incorrect attachment in an email, a mistaken central fact in a document, or a significant problem in tone in an email. "))))
 
 (defconst llm-buddy-tool-remove-note
@@ -1070,7 +1071,7 @@ call and its result.")
 
 The diff headers show where the user's cursor currently is.  The cursor position indicates what the user is actively working on.  Do not comment on incomplete code near the cursor -- the user is still typing.  Only comment on code that appears to be finished, such as completed statements or blocks that the user has moved past.
 
-Only note real problems, not hypothetical ones.  So, for example, note that there a typo, a bug, or a bad idea, but if you see something and wonder if it is correct, but have no evidence to the contrary, ignore it.  Remember that you do not have access to the latest information about the world, so do not try to speculate about the correctness about external facts that seem recent and beyond your range of knowledge.
+Only note real problems, not hypothetical ones.  So, for example, note that there's a typo, a bug, or a bad idea, but if you see something and wonder if it is correct, but have no evidence to the contrary, ignore it.  Remember that you do not have access to the latest information about the world, so do not try to speculate about the correctness about external facts that seem recent and beyond your range of knowledge.
 
 You have access to tools that allow you to read buffers.  The diffs you receive are in unified diff format, with @@ headers showing line numbers.  Diff context and added lines are prefixed with the current buffer line number to use with add_note.  Lines prefixed with \"old\" are removed text and are not in the current buffer; do not add notes for problems that only appear in old removed text.  Use the read_buffer tool if you need more context around a change.
 
