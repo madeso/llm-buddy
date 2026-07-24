@@ -75,6 +75,35 @@ This bounds provider or prompt failures where the model never calls the
   :type 'integer
   :group 'llm-buddy)
 
+(defconst llm-buddy--severities '(trivial significant critical)
+  "List of severities, in order of increasing severity.")
+
+(defun llm-buddy--severity-to-idx (severity)
+  "Convert SEVERITY symbol to an index."
+  (seq-position llm-buddy--severities severity))
+
+(defcustom llm-buddy-detect-minimum 'significant
+  "The smallest size of problem to report.
+Can be `trivial', `significant', or `critical'.  Setting this to
+`trivial' will mean that `llm-buddy' will detect things like typos or
+whitespace issues, and setting this to `critical' will mean that only
+the most serious problems ever get pointed out, which may mean that
+`llm-buddy' hardly ever does anything."
+  :type '(choice (const :tag "Trivial" trivial)
+                 (const :tag "Significant" significant)
+                 (const :tag "Critical" critical))
+  :group 'llm-buddy)
+
+(defcustom llm-buddy-fix-unreported nil
+  "If non-nil, llm-buddy will auto-correct below minimum severity."
+  :type 'boolean
+  :group 'llm-buddy)
+
+(defcustom llm-buddy-fix-idle-delay 3
+  "Seconds of idle time before attempting an automatic fix."
+  :type 'number
+  :group 'llm-buddy)
+
 (defvar llm-buddy-provider nil
   "LLM provider to use for generating feedback.
 
@@ -278,6 +307,12 @@ Return non-nil on success."
 (defvar llm-buddy--auto-last-run nil
   "Time of the last automatic advice run, or nil.")
 
+(defvar llm-buddy--note-review-timers (make-hash-table :test 'equal)
+  "Hash table mapping scope keys to pending note review idle timers.")
+
+(defvar llm-buddy--fix-timers (make-hash-table :test 'equal)
+  "Hash table mapping buffer and line keys to pending automatic fixes.")
+
 (defun llm-buddy--auto-maybe-run ()
   "Run `llm-buddy-advice' if enough time has elapsed since the last run."
   (when (or (null llm-buddy--auto-last-run)
@@ -302,6 +337,16 @@ Return non-nil on success."
   (when llm-buddy--auto-timer
     (cancel-timer llm-buddy--auto-timer)
     (setq llm-buddy--auto-timer nil))
+  (maphash (lambda (_key timer)
+             (cancel-timer timer))
+           llm-buddy--note-review-timers)
+  (clrhash llm-buddy--note-review-timers)
+  (maphash (lambda (_key pending)
+             (cancel-timer (plist-get pending :timer))
+             (set-marker (plist-get pending :beg) nil)
+             (set-marker (plist-get pending :end) nil))
+           llm-buddy--fix-timers)
+  (clrhash llm-buddy--fix-timers)
   (message "llm-buddy stopped"))
 
 ;;;###autoload
@@ -482,8 +527,23 @@ current state, so the LLM sees only what changed overall."
      "\n")))
 
 (defface llm-buddy-note-face
-  '((t :foreground "dark orange" :slant italic))
-  "Face for LLM buddy note overlays."
+  '((t :slant italic))
+  "Base face for LLM buddy note overlays."
+  :group 'llm-buddy)
+
+(defface llm-buddy-note-trivial-face
+  '((t :inherit (llm-buddy-note-face shadow)))
+  "Face for trivial LLM buddy note overlays."
+  :group 'llm-buddy)
+
+(defface llm-buddy-note-significant-face
+  '((t :inherit (llm-buddy-note-face warning)))
+  "Face for significant LLM buddy note overlays."
+  :group 'llm-buddy)
+
+(defface llm-buddy-note-critical-face
+  '((t :inherit (llm-buddy-note-face error) :weight bold))
+  "Face for critical LLM buddy note overlays."
   :group 'llm-buddy)
 
 (defvar llm-buddy--note-overlays nil
@@ -533,12 +593,174 @@ REASON describes what dismissed the note."
   (setf (plist-get note :dismissed-reason) (or reason "removed"))
   note)
 
+(defun llm-buddy--fix-region-bounds (line-number)
+  "Return bounds around LINE-NUMBER, including its neighboring lines."
+  (save-restriction
+    (widen)
+    (save-excursion
+      (goto-char (point-min))
+      (forward-line (1- line-number))
+      (let ((beg (save-excursion
+                   (forward-line -1)
+                   (point)))
+            (end (save-excursion
+                   (forward-line 2)
+                   (point))))
+        (cons beg end)))))
+
+(defun llm-buddy--start-fix-request
+    (buffer beg-marker end-marker original-content note mode)
+  "Request a fix for ORIGINAL-CONTENT in BUFFER.
+BEG-MARKER and END-MARKER track its bounds, NOTE describes the problem,
+and MODE is the buffer's major mode when the problem was detected."
+  (let ((applied nil))
+    (cl-labels
+        ((cleanup ()
+           (set-marker beg-marker nil)
+           (set-marker end-marker nil))
+         (replace-content
+           (new-content)
+           (cond
+            (applied "Fix was already applied.")
+            ((not (and (buffer-live-p buffer)
+                       (marker-buffer beg-marker)
+                       (marker-buffer end-marker)))
+             "Fix skipped because the target buffer is no longer available.")
+            ((not (equal original-content
+                         (with-current-buffer buffer
+                           (buffer-substring-no-properties
+                            beg-marker end-marker))))
+             "Fix skipped because the content changed while the fix was generated.")
+            (t
+             (with-current-buffer buffer
+               (save-excursion
+                 (atomic-change-group
+                   (delete-region beg-marker end-marker)
+                   (goto-char beg-marker)
+                   (insert new-content))))
+             (setq applied t)
+             (message "Fix applied in buffer: %s based on note: %s" (buffer-name buffer) note)
+             "Fix applied."))))
+      (let ((tool
+             (make-llm-tool
+              :function #'replace-content
+              :name "replace_content"
+              :description "Replace the supplied content with a corrected version."
+              :args '((:name "new_content" :type string :required t
+                             :description "The corrected replacement content.")))))
+        (condition-case err
+            (llm-chat-async
+             llm-buddy-provider
+             (llm-make-chat-prompt
+              (format "Buffer mode: %s\nProblem: %s\nContent to fix:\n%s"
+                      mode note original-content)
+              :context "We are running in Emacs.  A program detected a problem in the supplied buffer content.  If you can fix it, call replace_content with the complete corrected content; otherwise do not call a tool."
+              :tools (list tool))
+             (lambda (_response) (cleanup))
+             (lambda (_ err-message)
+               (cleanup)
+               (lwarn 'llm-buddy :error
+                      "llm-buddy could not create a fix: %s" err-message)))
+          (error
+           (cleanup)
+           (lwarn 'llm-buddy :error
+                  "llm-buddy could not start a fix: %s"
+                  (error-message-string err))))))))
+
+(defun llm-buddy--run-pending-fix
+    (key buffer beg-marker end-marker original-content note mode)
+  "Run the pending automatic fix identified by KEY."
+  (remhash key llm-buddy--fix-timers)
+  (if (and (buffer-live-p buffer)
+           (marker-buffer beg-marker)
+           (marker-buffer end-marker)
+           (equal original-content
+                  (with-current-buffer buffer
+                    (buffer-substring-no-properties beg-marker end-marker))))
+      (llm-buddy--start-fix-request
+       buffer beg-marker end-marker original-content note mode)
+    (set-marker beg-marker nil)
+    (set-marker end-marker nil)))
+
+(defun llm-buddy--attempt-fix (buffer-name line-number note)
+  "Schedule a fix for NOTE at BUFFER-NAME:LINE-NUMBER after idle time."
+  (let ((buffer (llm-buddy--find-buffer buffer-name)))
+    (if (not (bufferp buffer))
+        buffer
+      (with-current-buffer buffer
+        (pcase-let* ((`(,beg . ,end)
+                      (llm-buddy--fix-region-bounds line-number))
+                     (beg-marker (copy-marker beg))
+                     (end-marker (copy-marker end t))
+                     (original-content
+                      (buffer-substring-no-properties beg end))
+                     (key (list buffer line-number))
+                     (old (gethash key llm-buddy--fix-timers)))
+          (when old
+            (cancel-timer (plist-get old :timer))
+            (set-marker (plist-get old :beg) nil)
+            (set-marker (plist-get old :end) nil))
+          (let ((timer
+                 (run-with-idle-timer
+                  llm-buddy-fix-idle-delay nil
+                  #'llm-buddy--run-pending-fix
+                  key buffer beg-marker end-marker original-content note
+                  major-mode)))
+            (puthash key (list :timer timer
+                               :beg beg-marker
+                               :end end-marker)
+                     llm-buddy--fix-timers)
+            (format "Automatic fix scheduled after %s seconds of idle time."
+                    llm-buddy-fix-idle-delay)))))))
+
 (defun llm-buddy--notes-for-scope (scope-key)
   "Return notes for SCOPE-KEY, newest first."
   (cl-remove-if-not
    (lambda (note)
      (equal (llm-buddy--note-scope-key note) scope-key))
    llm-buddy--notes))
+
+(defun llm-buddy--note-face (severity)
+  "Return the note face for SEVERITY."
+  (pcase severity
+    ('trivial 'llm-buddy-note-trivial-face)
+    ('significant 'llm-buddy-note-significant-face)
+    ('critical 'llm-buddy-note-critical-face)
+    (_ 'llm-buddy-note-face)))
+
+(defun llm-buddy--set-note-overlay-text (ov note severity)
+  "Set OV's visible note text to NOTE, styled for SEVERITY."
+  (overlay-put ov 'after-string
+               (propertize (concat " " note)
+                           'face (llm-buddy--note-face severity))))
+
+(defun llm-buddy--clear-reviewed-note-flags (scope-key reviewed-through)
+  "Clear edited-note review flags in SCOPE-KEY through REVIEWED-THROUGH."
+  (dolist (note (llm-buddy--notes-for-scope scope-key))
+    (when (and (eq (plist-get note :status) 'active)
+               (plist-get note :review-needed)
+               (not (time-less-p reviewed-through
+                                 (plist-get note :edited-time))))
+      (setf (plist-get note :review-needed) nil))))
+
+(defun llm-buddy--note-review-callback (scope-key buffer)
+  "Run advice for SCOPE-KEY in BUFFER after the user stops typing."
+  (remhash scope-key llm-buddy--note-review-timers)
+  (when (buffer-live-p buffer)
+    (if llm-buddy--advice-running
+        (llm-buddy--schedule-note-review scope-key buffer)
+      (with-current-buffer buffer
+        (llm-buddy-advice)))))
+
+(defun llm-buddy--schedule-note-review (scope-key buffer)
+  "Schedule an idle advice run for SCOPE-KEY in BUFFER."
+  (when-let* ((timer (gethash scope-key llm-buddy--note-review-timers)))
+    (cancel-timer timer))
+  (puthash scope-key
+           (run-with-idle-timer
+            llm-buddy-auto-idle-delay nil
+            #'llm-buddy--note-review-callback scope-key buffer)
+           llm-buddy--note-review-timers))
 
 (defun llm-buddy--format-notes (&optional scope-key)
   "Return a string describing previous notes in SCOPE-KEY for the agent.
@@ -558,10 +780,13 @@ When SCOPE-KEY is nil, use the current buffer's scope."
                     (plist-get note :buffer)
                     (llm-buddy--note-line note)
                     (plist-get note :note)
-                    (if (eq status 'dismissed)
-                        (format " (dismissed: %s)"
-                                (or (plist-get note :dismissed-reason) "unknown"))
-                      ""))))
+                    (cond
+                     ((eq status 'dismissed)
+                      (format " (dismissed: %s)"
+                              (or (plist-get note :dismissed-reason) "unknown")))
+                     ((plist-get note :review-needed)
+                      " (the annotated line changed since this note was added or updated; decide whether to remove_note or update_note)")
+                     (t "")))))
         notes
         "\n")))))
 
@@ -583,68 +808,115 @@ suggestion string instead."
                                candidates "\n"))
           (format "Buffer not found: %s" buffer-name)))))
 
-(defun llm-buddy--add-note (buffer-name line-number note)
-  "Add a note overlay in BUFFER-NAME at LINE-NUMBER with text NOTE.
-The overlay is removed when the user edits the annotated line."
+(defun llm-buddy--add-note (buffer-name line-number note severity)
+  "Conditionally add NOTE in BUFFER-NAME at LINE-NUMBER.
+When the user edits the annotated line, the note remains visible and
+is reviewed again after idle time.
+
+SEVERITY is a string, one of the possible values of
+`llm-buddy-detect-minimum'.  If this is less than the minimum severity,
+we will attempt to fix it if `llm-buddy-fix-unreported' is non-nil."
   (let* ((buf (llm-buddy--find-buffer buffer-name))
          (line-num (if (stringp line-number)
                        (string-to-number line-number)
-                     line-number)))
-    (if (stringp buf)
-        buf
-      (with-current-buffer buf
-        (let* ((scope (llm-buddy--scope))
-               (scope-key (plist-get scope :key)))
-          (if (and llm-buddy--active-advice-scope-key
-                   (not (equal scope-key llm-buddy--active-advice-scope-key)))
-              (format "Cannot add note to %s because it is outside the current advice scope (%s)."
-                      (buffer-name buf)
-                      llm-buddy--active-advice-scope-key)
-            (save-excursion
-              (goto-char (point-min))
-              (forward-line (1- line-num))
-              (let* ((line-beg (line-beginning-position))
-                     (line-end (line-end-position))
-                     (ov (make-overlay line-beg line-end buf nil t))
-                     (id llm-buddy--next-note-id)
-                     (record (list :id id
-                                   :status 'active
-                                   :dismissed-time nil
-                                   :dismissed-reason nil
-                                   :scope-key scope-key
-                                   :scope-description
-                                   (plist-get scope :description)
-                                   :buffer (buffer-name buf)
-                                   :line line-num
-                                   :note note
-                                   :time (current-time)
-                                   :overlay ov)))
-                (setq llm-buddy--next-note-id (1+ llm-buddy--next-note-id))
-                ;; We want the overlay to stay in line with the text noted.
-                (overlay-put ov 'after-string
-                             (propertize (concat " " note)
-                                         'face 'llm-buddy-note-face))
-                (overlay-put ov 'llm-buddy-note t)
-                (overlay-put ov 'llm-buddy-note-record record)
-                (overlay-put ov 'modification-hooks
-                             (list #'llm-buddy--note-modification-hook))
-                (overlay-put ov 'insert-in-front-hooks
-                             (list #'llm-buddy--note-modification-hook))
-                (overlay-put ov 'insert-behind-hooks
-                             (list #'llm-buddy--note-modification-hook))
-                (push ov llm-buddy--note-overlays)
-                (push record llm-buddy--notes)
-                (let ((result (format "Note %d added at line %d in %s"
-                                      id line-num buffer-name)))
-                  (run-hook-with-args
-                   'llm-buddy-advice-tool-functions
-                   (list :tool "add_note"
-                         :note-id id
-                         :buffer buffer-name
-                         :line line-num
-                         :note note
-                         :result result))
-                  result)))))))))
+                     line-number))
+         (severity-symbol (cond
+                           ((symbolp severity) severity)
+                           ((stringp severity) (intern-soft severity))))
+         (severity-idx (llm-buddy--severity-to-idx severity-symbol))
+         (min-severity-idx (llm-buddy--severity-to-idx llm-buddy-detect-minimum)))
+    (cond ((stringp buf) buf)
+          ((null severity-idx)
+           (format "Cannot add note because severity %S is invalid." severity))
+          ((null min-severity-idx)
+           (format "Cannot add note because `llm-buddy-detect-minimum' is invalid: %S."
+                   llm-buddy-detect-minimum))
+          ((< severity-idx min-severity-idx)
+           (if llm-buddy-fix-unreported
+               (llm-buddy--attempt-fix buffer-name line-num note)
+             "Ignoring error with severity below the user's set threshold value"))
+          (t (with-current-buffer buf
+               (let* ((scope (llm-buddy--scope))
+                      (scope-key (plist-get scope :key)))
+                 (if (and llm-buddy--active-advice-scope-key
+                          (not (equal scope-key llm-buddy--active-advice-scope-key)))
+                     (format "Cannot add note to %s because it is outside the current advice scope (%s)."
+                             (buffer-name buf)
+                             llm-buddy--active-advice-scope-key)
+                   (save-excursion
+                     (goto-char (point-min))
+                     (forward-line (1- line-num))
+                     (let* ((line-beg (line-beginning-position))
+                            (line-end (line-end-position))
+                            (ov (make-overlay line-beg line-end buf nil t))
+                            (id llm-buddy--next-note-id)
+                            (record (list :id id
+                                          :status 'active
+                                          :dismissed-time nil
+                                          :dismissed-reason nil
+                                          :scope-key scope-key
+                                          :scope-description
+                                          (plist-get scope :description)
+                                          :buffer (buffer-name buf)
+                                          :line line-num
+                                          :note note
+                                          :severity severity-symbol
+                                          :time (current-time)
+                                          :updated-time nil
+                                          :edited-time nil
+                                          :review-needed nil
+                                          :overlay ov)))
+                       (setq llm-buddy--next-note-id (1+ llm-buddy--next-note-id))
+                       ;; We want the overlay to stay in line with the text noted.
+                       (llm-buddy--set-note-overlay-text ov note severity-symbol)
+                       (overlay-put ov 'llm-buddy-note t)
+                       (overlay-put ov 'llm-buddy-note-record record)
+                       (overlay-put ov 'modification-hooks
+                                    (list #'llm-buddy--note-modification-hook))
+                       (overlay-put ov 'insert-in-front-hooks
+                                    (list #'llm-buddy--note-modification-hook))
+                       (overlay-put ov 'insert-behind-hooks
+                                    (list #'llm-buddy--note-modification-hook))
+                       (push ov llm-buddy--note-overlays)
+                       (push record llm-buddy--notes)
+                       (let ((result (format "Note %d added at line %d in %s"
+                                             id line-num buffer-name)))
+                         (run-hook-with-args
+                          'llm-buddy-advice-tool-functions
+                          (list :tool "add_note"
+                                :note-id id
+                                :buffer buffer-name
+                                :line line-num
+                                :note note
+                                :result result))
+                         result))))))))))
+
+(defun llm-buddy--update-note (note-id note)
+  "Replace the text of active NOTE-ID with NOTE."
+  (let ((record (llm-buddy--find-note note-id
+                                      llm-buddy--active-advice-scope-key)))
+    (cond
+     ((null record)
+      (format "Note not found: %s" note-id))
+     ((eq (plist-get record :status) 'dismissed)
+      (format "Note %d is dismissed and cannot be updated."
+              (plist-get record :id)))
+     (t
+      (setf (plist-get record :note) note)
+      (setf (plist-get record :updated-time) (current-time))
+      (setf (plist-get record :review-needed) nil)
+      (when-let* ((ov (plist-get record :overlay)))
+        (when (overlayp ov)
+          (llm-buddy--set-note-overlay-text
+           ov note (plist-get record :severity))))
+      (let ((result (format "Note %d updated." (plist-get record :id))))
+        (run-hook-with-args
+         'llm-buddy-advice-tool-functions
+         (list :tool "update_note"
+               :note-id (plist-get record :id)
+               :note note
+               :result result))
+        result)))))
 
 (defun llm-buddy--remove-note (note-id)
   "Remove the active note NOTE-ID, keeping dismissed note history."
@@ -664,13 +936,18 @@ The overlay is removed when the user edits the annotated line."
                :result result))
         result)))))
 
-(defun llm-buddy--note-modification-hook (ov _after &rest _args)
-  "Remove overlay OV when its line is modified."
-  (when (overlayp ov)
-    (if-let* ((note (overlay-get ov 'llm-buddy-note-record)))
-        (llm-buddy--dismiss-note-record note "line edited")
-      (setq llm-buddy--note-overlays (delq ov llm-buddy--note-overlays))
-      (delete-overlay ov))))
+(defun llm-buddy--note-modification-hook (ov after &rest _args)
+  "Mark OV's note for review after its line is modified."
+  (when (and after (overlayp ov))
+    (when-let* ((note (overlay-get ov 'llm-buddy-note-record))
+                (buf (overlay-buffer ov)))
+      (setf (plist-get note :edited-time) (current-time))
+      (setf (plist-get note :line)
+            (with-current-buffer buf
+              (line-number-at-pos (overlay-start ov))))
+      (setf (plist-get note :review-needed) t)
+      (llm-buddy--schedule-note-review
+       (llm-buddy--note-scope-key note) buf))))
 
 (defun llm-buddy-dismiss-note ()
   "Remove the llm-buddy note overlay on the current line, if any."
@@ -733,10 +1010,16 @@ the base name (e.g. uniquified names), return a message listing them."
   (make-llm-tool
    :function #'llm-buddy--add-note
    :name "add_note"
-   :description "Add a note at a specific line in a buffer.  This is called to draw the user's attention to part of the code, to help correct errors and mistakes of a sort that wouldn't be caught by linters or other tools.  The note should be short, just a brief sentence."
+   :description "Add a note at a specific line in a buffer.  This is called to draw the user's attention to part of the code, to help correct errors and mistakes of a sort that wouldn't be caught by linters or other tools.  The note should be short, just a brief sentence.  The user may disallow notes under a certain severity, but this is handled by the tool itself; just send all notes as you create them regardless of severity."
    :args '((:name "buffer" :type string :description "Name of the buffer to annotate." :required t)
            (:name "line_number" :type integer :description "Line number to annotate." :required t)
-           (:name "note" :type string :description "The content of the note to add.  Should be a suggestion or comment about something the user should look at." :required t))))
+           (:name "note" :type string :description "The content of the note to add.  Should be a suggestion or comment about something the user should look at." :required t)
+           (:name "severity" :type string :enum ["trivial" "significant" "critical"] :required t
+                  :description "The severity of the problem.
+This can be one of the following values:
+  - Trivial: things like typos or whitespace that do not have any significant effect on what the user is doing (such as a typo in a comment).  Or something that may not quite be best practice, but is fine.  Or a phrasing that is a bit off.
+  - Significant: things that will affect what the user is doing.  A typo in a variable name, or a sentence that can't be made sense of in an email.  A bug that will cause the program to misbehave.  An incorrect fact in a document.
+  - Critical: things that are extremely important and represent a significant failure.  A security problem, an incorrect attachment in an email, a mistaken central fact in a document, or a significant problem in tone in an email. "))))
 
 (defconst llm-buddy-tool-remove-note
   (make-llm-tool
@@ -744,6 +1027,14 @@ the base name (e.g. uniquified names), return a message listing them."
    :name "remove_note"
    :description "Remove one of your previous active notes by note_id.  This dismisses the visible Emacs overlay but keeps the note in history as dismissed."
    :args '((:name "note_id" :type integer :description "The note_id from the previous notes list." :required t))))
+
+(defconst llm-buddy-tool-update-note
+  (make-llm-tool
+   :function #'llm-buddy--update-note
+   :name "update_note"
+   :description "Update the text of one of your previous active notes by note_id.  Use this when an edited line still has a problem, but the existing note is no longer accurate."
+   :args '((:name "note_id" :type integer :description "The note_id from the previous notes list." :required t)
+           (:name "note" :type string :description "The replacement note text.  It should be short, just a brief sentence." :required t))))
 
 (defconst llm-buddy-tool-end
   (make-llm-tool
@@ -776,15 +1067,15 @@ call and its result.")
                                 (project-root proj))
                       "")))
     (concat
-     "You are a helpful assistant running in Emacs.  As the user goes about their work, you observe the changes they make to their files.  The changes you see may span multiple changed buffers." proj-info "  When asked, you provide feedback on recent changes in tracked buffers, including suggestions for improvement or correction.  You only comment on things that could be improved, and you never say anything if there is nothing worth remarking about.
+     "You are a helpful assistant running in Emacs.  As the user goes about their work, you observe the changes they make to their files.  The changes you see may span multiple changed buffers." proj-info "  You will provide feedback on recent changes in tracked buffers, including suggestions for improvement or correction.  You only comment on things that could be improved, and you never say anything if there is nothing worth remarking about.
 
 The diff headers show where the user's cursor currently is.  The cursor position indicates what the user is actively working on.  Do not comment on incomplete code near the cursor -- the user is still typing.  Only comment on code that appears to be finished, such as completed statements or blocks that the user has moved past.
 
-Only note real problems, not hypothetical ones.  So, for example, note that there a typo, a bug, or a bad idea, but if you see something and wonder if it is correct, but have no evidence to the contrary, ignore it.  Remember that you do not have access to the latest information about the world, so do not try to speculate about the correctness about external facts that seem recent and beyond your range of knowledge.  Avoid commenting about whitespace unless it is significant in some way (Python, for example) or any problem that is excessively nitpicky.
+Only note real problems, not hypothetical ones.  So, for example, note that there's a typo, a bug, or a bad idea, but if you see something and wonder if it is correct, but have no evidence to the contrary, ignore it.  Remember that you do not have access to the latest information about the world, so do not try to speculate about the correctness about external facts that seem recent and beyond your range of knowledge.
 
 You have access to tools that allow you to read buffers.  The diffs you receive are in unified diff format, with @@ headers showing line numbers.  Diff context and added lines are prefixed with the current buffer line number to use with add_note.  Lines prefixed with \"old\" are removed text and are not in the current buffer; do not add notes for problems that only appear in old removed text.  Use the read_buffer tool if you need more context around a change.
 
-To make a note about part of the code, call the add_note tool with the buffer name and line number.  It will result in an Emacs buffer overlay with your note on it.  The tool result includes the note_id.  If an active previous note is no longer useful, or any previous note seems no longer relevant, call remove_note with its note_id.  You can add or remove notes as many times as you need to.  When there is nothing left to say, call the end tool.
+To make a note about part of the code, call the add_note tool with the buffer name and line number.  It will result in an Emacs buffer overlay with your note on it.  The tool result includes the note_id.  If an active previous note is no longer useful, or any previous note seems no longer relevant, call remove_note with its note_id.  If an active previous note is still useful but its text is no longer accurate, call update_note with its note_id and replacement note text.  Previous notes can be marked to show that the annotated line changed since the note was added or updated; for those notes, use the diff and read_buffer as needed to decide whether the note should be removed, updated, or left alone.  You can add, update, or remove notes as many times as you need to.  When there is nothing left to say, call the end tool.
 
 The current review is scoped to either the current project or the current non-project buffer.  Only add notes to buffers shown in this review scope.
 
@@ -800,6 +1091,8 @@ time were reviewed successfully."
   (when reviewed-through
     (setq llm-buddy--last-advice-time reviewed-through)
     (when llm-buddy--active-advice-scope-key
+      (llm-buddy--clear-reviewed-note-flags
+       llm-buddy--active-advice-scope-key reviewed-through)
       (puthash llm-buddy--active-advice-scope-key reviewed-through
                llm-buddy--last-advice-times)))
   (setq llm-buddy--active-advice-scope-key nil)
@@ -867,6 +1160,7 @@ The output is added as overlay text in the relevant buffer."
                         :tools (list llm-buddy-tool-read-buffer
                                      llm-buddy-tool-note
                                      llm-buddy-tool-remove-note
+                                     llm-buddy-tool-update-note
                                      llm-buddy-tool-end)
                         :tool-options (make-llm-tool-options :tool-choice 'any))))
           (run-hook-with-args

@@ -159,10 +159,33 @@ CHANGES and FORMATTED-DIFF are the inputs sent to the LLM."
              (plist-put
               llm-buddy-quality--current-call
               :notes
-              (cons (list :buffer (plist-get event :buffer)
+              (cons (list :note-id (plist-get event :note-id)
+                          :buffer (plist-get event :buffer)
                           :line (plist-get event :line)
                           :message (plist-get event :note))
                     (plist-get llm-buddy-quality--current-call :notes)))))
+      ("update_note"
+       (setq llm-buddy-quality--current-call
+             (plist-put
+              llm-buddy-quality--current-call
+              :notes
+              (mapcar
+               (lambda (note)
+                 (if (equal (plist-get note :note-id)
+                            (plist-get event :note-id))
+                     (plist-put note :message (plist-get event :note))
+                   note))
+               (plist-get llm-buddy-quality--current-call :notes)))))
+      ("remove_note"
+       (setq llm-buddy-quality--current-call
+             (plist-put
+              llm-buddy-quality--current-call
+              :notes
+              (cl-remove-if
+               (lambda (note)
+                 (equal (plist-get note :note-id)
+                        (plist-get event :note-id)))
+               (plist-get llm-buddy-quality--current-call :notes)))))
       (_ nil))))
 
 (defun llm-buddy-quality--advice-done ()
