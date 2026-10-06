@@ -10,10 +10,11 @@
 			"type": "extensionHost",
 			"request": "launch",
 			"args": [
-				"--extensionDevelopmentPath=${workspaceFolder}"
+				"--extensionDevelopmentPath=${workspaceFolder}/code",
+				"C:\\w\\p\\euphoria\\",
 			],
 			"outFiles": [
-				"${workspaceFolder}/out/**/*.js"
+				"${workspaceFolder}/code/out/**/*.js"
 			],
 			"preLaunchTask": "${defaultBuildTask}"
 		}
