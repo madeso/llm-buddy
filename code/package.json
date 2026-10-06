@@ -1,7 +1,7 @@
 {
   "name": "llm-buddy",
   "displayName": "llm-buddy",
-  "description": "Buddy watches your edits and has comments",
+  "description": "LLM feedback on your recent edits",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.138.0"
@@ -9,15 +9,133 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "llm-buddy.helloWorld",
-        "title": "Hello World"
+        "command": "llmBuddy.reviewChanges",
+        "title": "llm-buddy: Review Recent Changes"
+      },
+      {
+        "command": "llmBuddy.clearHistory",
+        "title": "llm-buddy: Clear Change History"
+      },
+      {
+        "command": "llmBuddy.dismissNoteAt",
+        "title": "llm-buddy: Dismiss Note on Current Line"
+      },
+      {
+        "command": "llmBuddy.dismissAllNotes",
+        "title": "llm-buddy: Dismiss All Notes"
+      },
+      {
+        "command": "llmBuddy.toggleAutomaticReview",
+        "title": "llm-buddy: Toggle Automatic Review"
+      },
+      {
+        "command": "llmBuddy.setApiKey",
+        "title": "llm-buddy: Set or Clear API Key"
+      },
+      {
+        "command": "llmBuddy.toggleQualityCapture",
+        "title": "llm-buddy: Toggle Quality Capture"
+      },
+      {
+        "command": "llmBuddy.judgeLastReview",
+        "title": "llm-buddy: Judge Last Review"
+      },
+      {
+        "command": "llmBuddy.exportQualityCases",
+        "title": "llm-buddy: Export Quality Cases"
+      },
+      {
+        "command": "llmBuddy.runBenchmarks",
+        "title": "llm-buddy: Run Benchmarks"
+      },
+      {
+        "command": "llmBuddy.exportBenchmarkReport",
+        "title": "llm-buddy: Export Benchmark Report"
+      },
+      {
+        "command": "llmBuddy.exportBenchmarkHtmlReport",
+        "title": "llm-buddy: Export Benchmark HTML Report"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "llm-buddy",
+      "properties": {
+        "llmBuddy.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically review recent edits after idle time."
+        },
+        "llmBuddy.provider": {
+          "type": "string",
+          "enum": ["openai-compatible", "vscode-language-model"],
+          "default": "openai-compatible",
+          "description": "LLM provider. The VS Code Language Model provider is a placeholder."
+        },
+        "llmBuddy.openAI.baseUrl": {
+          "type": "string",
+          "default": "http://localhost:1234/v1",
+          "description": "Base URL for the OpenAI-compatible local server."
+        },
+        "llmBuddy.openAI.model": {
+          "type": "string",
+          "default": "local-model",
+          "description": "Model name expected by the OpenAI-compatible server."
+        },
+        "llmBuddy.coalesceWindow": {
+          "type": "number",
+          "default": 180,
+          "minimum": 0,
+          "description": "Seconds during which edits in the same document are grouped into one change."
+        },
+        "llmBuddy.autoInterval": {
+          "type": "number",
+          "default": 60,
+          "minimum": 0,
+          "description": "Minimum seconds between automatic reviews in the same scope."
+        },
+        "llmBuddy.autoIdleDelay": {
+          "type": "number",
+          "default": 10,
+          "minimum": 0,
+          "description": "Seconds of idle time before an automatic review."
+        },
+        "llmBuddy.detectMinimum": {
+          "type": "string",
+          "enum": ["trivial", "significant", "critical"],
+          "default": "significant",
+          "description": "Minimum severity to show as an inline note."
+        },
+        "llmBuddy.fixUnreported": {
+          "type": "boolean",
+          "default": false,
+          "description": "Attempt a guarded automatic fix for findings below the minimum severity."
+        },
+        "llmBuddy.fixIdleDelay": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "description": "Seconds of idle time before requesting an automatic fix."
+        },
+        "llmBuddy.maxIterations": {
+          "type": "integer",
+          "default": 8,
+          "minimum": 1,
+          "description": "Maximum LLM tool-call iterations for one review."
+        },
+        "llmBuddy.captureQualityData": {
+          "type": "boolean",
+          "default": false,
+          "description": "Capture prompts, provider responses, and note tool calls for manual quality judging."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
