@@ -18,7 +18,7 @@ export function getSetting<T>(name: SettingsKey, fallback: T): T {
 	return vscode.workspace.getConfiguration('llmBuddy').get<T>(name, fallback);
 }
 
-export function severityRank(severity: Severity): number {
+export function rank_from_severity(severity: Severity): number {
 	switch (severity) {
 		case 'trivial':
 			return 0;
@@ -29,6 +29,6 @@ export function severityRank(severity: Severity): number {
 	}
 }
 
-export function isSeverity(value: unknown): value is Severity {
+export function is_severity(value: unknown): value is Severity {
 	return value === 'trivial' || value === 'significant' || value === 'critical';
 }

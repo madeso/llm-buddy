@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { ChangeTracker, getScopeDescription, getScopeKey } from './changeTracker';
 import { createNumberedDiff, reconstructOriginal } from './diff';
 import { NoteToolEvent, NotesManager } from './notes';
-import { getSetting, isSeverity, severityRank } from './settings';
+import { getSetting, is_severity, rank_from_severity } from './settings';
 import {
 	ChatMessage,
 	ChangeChunk,
@@ -284,7 +284,7 @@ export class ReviewService {
 		if (typeof args.line_number !== 'number' || !Number.isInteger(args.line_number)) {
 			return 'line_number must be an integer.';
 		}
-		if (!isSeverity(args.severity)) {
+		if (!is_severity(args.severity)) {
 			return 'severity must be trivial, significant, or critical.';
 		}
 		const chunk = this.findChunk(args.file, scopeKey, changes);
@@ -292,10 +292,10 @@ export class ReviewService {
 			return 'File is not part of this review scope.';
 		}
 		const minimum = getSetting<Severity>('detectMinimum', 'significant');
-		if (!isSeverity(minimum)) {
+		if (!is_severity(minimum)) {
 			return 'llmBuddy.detectMinimum must be trivial, significant, or critical.';
 		}
-		if (severityRank(args.severity) < severityRank(minimum)) {
+		if (rank_from_severity(args.severity) < rank_from_severity(minimum)) {
 			if (getSetting('fixUnreported', false)) {
 				return this.scheduleFix(chunk.uri, args.line_number, args.note);
 			}
