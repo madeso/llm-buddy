@@ -1,7 +1,20 @@
 import * as vscode from 'vscode';
 import { Severity } from './types';
 
-export function getSetting<T>(name: string, fallback: T): T {
+export type SettingsKey
+	= 'coalesceWindow'
+	| 'enabled'
+	| 'autoInterval'
+	| 'autoIdleDelay'
+	| 'captureQualityData'
+	| 'provider'
+	| 'maxIterations'
+	| 'detectMinimum'
+	| 'fixUnreported'
+	| 'fixIdleDelay'
+	;
+
+export function getSetting<T>(name: SettingsKey, fallback: T): T {
 	return vscode.workspace.getConfiguration('llmBuddy').get<T>(name, fallback);
 }
 
