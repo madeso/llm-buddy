@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { ChangeTracker, getScopeKey } from '../changeTracker';
-import { NotesManager } from '../notes';
+import { NotesManager } from '../notes_manager';
 import { ReviewService } from '../reviewService';
 import { ChatMessage, LlmProvider, ToolDefinition } from '../types';
 

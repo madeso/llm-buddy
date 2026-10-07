@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import { ChangeTracker, getScopeDescription, getScopeKey } from './changeTracker';
 import { createNumberedDiff, reconstructOriginal } from './diff';
-import { NoteToolEvent, NotesManager } from './notes';
-import { getSetting, is_severity, rank_from_severity } from './settings';
+import { NoteToolEvent, NotesManager } from './notes_manager';
+import { get_setting_or, is_severity, rank_from_severity } from './settings';
 import {
 	ChatMessage,
 	ChangeChunk,
@@ -153,7 +153,7 @@ export class ReviewService {
 		this.captures.set(scopeKey, capture);
 		try {
 			const provider = await this.providerFactory();
-			capture.provider = getSetting('provider', 'openai-compatible');
+			capture.provider = get_setting_or('provider', 'openai-compatible');
 			await this.runConversation(provider, scopeKey, changes, diff, reviewedRevision, capture);
 		} catch (error) {
 			if (!showMessages) {
@@ -183,7 +183,7 @@ export class ReviewService {
 				content: `${diff}${this.formatPreviousNotes(scopeKey)}`,
 			},
 		];
-		const maximumIterations = getSetting('maxIterations', 8);
+		const maximumIterations = get_setting_or('maxIterations', 8);
 		for (let iteration = 0; iteration < maximumIterations; iteration++) {
 			const response = await provider.complete(messages, reviewTools);
 			capture.responses.push(response.message);
@@ -291,12 +291,12 @@ export class ReviewService {
 		if (!chunk) {
 			return 'File is not part of this review scope.';
 		}
-		const minimum = getSetting<Severity>('detectMinimum', 'significant');
+		const minimum = get_setting_or<Severity>('detectMinimum', 'significant');
 		if (!is_severity(minimum)) {
 			return 'llmBuddy.detectMinimum must be trivial, significant, or critical.';
 		}
 		if (rank_from_severity(args.severity) < rank_from_severity(minimum)) {
-			if (getSetting('fixUnreported', false)) {
+			if (get_setting_or('fixUnreported', false)) {
 				return this.scheduleFix(chunk.uri, args.line_number, args.note);
 			}
 			return 'Ignoring note below the configured minimum severity.';
@@ -389,9 +389,9 @@ export class ReviewService {
 				const message = error instanceof Error ? error.message : String(error);
 				vscode.window.showErrorMessage(`llm-buddy automatic fix failed: ${message}`);
 			});
-		}, Math.max(0, getSetting('fixIdleDelay', 3)) * 1000);
+		}, Math.max(0, get_setting_or('fixIdleDelay', 3)) * 1000);
 		this.fixTimers.set(key, timer);
-		return `Automatic fix scheduled after ${getSetting('fixIdleDelay', 3)} seconds of idle time.`;
+		return `Automatic fix scheduled after ${get_setting_or('fixIdleDelay', 3)} seconds of idle time.`;
 	}
 
 	private async runFix(uri: string, lineNumber: number, problem: string): Promise<void> {

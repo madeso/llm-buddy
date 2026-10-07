@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { benchmarkCases } from './benchmarkCases';
 import { ChangeTracker, getScopeKey } from './changeTracker';
-import { NotesManager } from './notes';
+import { NotesManager } from './notes_manager';
 import { ReviewService } from './reviewService';
 
 interface BenchmarkResult {

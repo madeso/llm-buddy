@@ -14,7 +14,7 @@ export type SettingsKey
 	| 'fixIdleDelay'
 	;
 
-export function getSetting<T>(name: SettingsKey, fallback: T): T {
+export function get_setting_or<T>(name: SettingsKey, fallback: T): T {
 	return vscode.workspace.getConfiguration('llmBuddy').get<T>(name, fallback);
 }
 

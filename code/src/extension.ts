@@ -1,59 +1,62 @@
 import * as vscode from 'vscode';
 import { BenchmarkService } from './benchmarkService';
 import { ChangeTracker, getScopeKey } from './changeTracker';
-import { NotesManager } from './notes';
+import { NotesManager } from './notes_manager';
 import { apiKeySecretKey, createProvider } from './providers';
 import { QualityService } from './quality';
 import { ReviewService } from './reviewService';
-import { getSetting } from './settings';
+import { get_setting_or } from './settings';
 
 export function activate(context: vscode.ExtensionContext): void {
-	const tracker = new ChangeTracker(getSetting('coalesceWindow', 180));
+	const tracker = new ChangeTracker(get_setting_or('coalesceWindow', 180));
 	const notes = new NotesManager(context);
+
 	const reviews = new ReviewService(tracker, notes, () => createProvider(context));
 	const quality = new QualityService(context);
 	const benchmarks = new BenchmarkService(tracker, notes, reviews);
-	const automaticTimers = new Map<string, ReturnType<typeof setTimeout>>();
-	const lastAutomaticRuns = new Map<string, number>();
+
+	const scopeKey_to_automaticTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	const scopeKey_to_lastAutomaticRuns = new Map<string, number>();
 
 	context.subscriptions.push(tracker, notes, reviews, benchmarks);
 	reviews.setCaptureHandler((capture) => quality.handleCapture(capture));
 
-	const openDocumentForScope = (scopeKey: string): vscode.TextDocument | undefined =>
+	const find_openDocument_from_ScopeKey = (scopeKey: string): vscode.TextDocument | undefined =>
 		vscode.workspace.textDocuments.find((document) => getScopeKey(document.uri) === scopeKey);
 
-	const scheduleReview = (scopeKey: string, delaySeconds: number): void => {
-		const previous = automaticTimers.get(scopeKey);
-		if (previous) {
-			clearTimeout(previous);
+	const scheduleReview = (scopeKey: string, delay_in_seconds: number): void => {
+		const old_timer = scopeKey_to_automaticTimers.get(scopeKey);
+		if (old_timer) {
+			clearTimeout(old_timer);
 		}
 		const timer = setTimeout(() => {
-			automaticTimers.delete(scopeKey);
-			if (!getSetting('enabled', false)) {
+			scopeKey_to_automaticTimers.delete(scopeKey);
+			if (!get_setting_or('enabled', false)) {
 				return;
 			}
-			const interval = Math.max(0, getSetting('autoInterval', 60)) * 1000;
-			const remaining = interval - (Date.now() - (lastAutomaticRuns.get(scopeKey) ?? 0));
+			const interval = Math.max(0, get_setting_or('autoInterval', 60)) * 1000;
+			const last_run = scopeKey_to_lastAutomaticRuns.get(scopeKey);
+			const remaining = interval - (Date.now() - (last_run ?? 0));
 			if (remaining > 0) {
-				scheduleReview(scopeKey, Math.max(delaySeconds, remaining / 1000));
+				scheduleReview(scopeKey, Math.max(delay_in_seconds, remaining / 1000));
 				return;
 			}
-			const document = openDocumentForScope(scopeKey);
+			const document = find_openDocument_from_ScopeKey(scopeKey);
 			if (document) {
-				lastAutomaticRuns.set(scopeKey, Date.now());
+				scopeKey_to_lastAutomaticRuns.set(scopeKey, Date.now());
 				void reviews.review(document.uri);
 			}
-		}, Math.max(0, delaySeconds) * 1000);
-		automaticTimers.set(scopeKey, timer);
+		}, Math.max(0, delay_in_seconds) * 1000);
+		scopeKey_to_automaticTimers.set(scopeKey, timer);
 	};
 
 	notes.setEditedHandler((scopeKey) => {
-		scheduleReview(scopeKey, getSetting('autoIdleDelay', 10));
+		scheduleReview(scopeKey, get_setting_or('autoIdleDelay', 10));
 	});
 
 	context.subscriptions.push(vscode.workspace.onDidChangeTextDocument((event) => {
-		if (event.contentChanges.length > 0 && getSetting('enabled', false)) {
-			scheduleReview(getScopeKey(event.document.uri), getSetting('autoIdleDelay', 10));
+		if (event.contentChanges.length > 0 && get_setting_or('enabled', false)) {
+			scheduleReview(getScopeKey(event.document.uri), get_setting_or('autoIdleDelay', 10));
 		}
 	}));
 
@@ -87,7 +90,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.toggleAutomaticReview', async () => {
 		const config = vscode.workspace.getConfiguration('llmBuddy');
-		const enabled = !getSetting('enabled', false);
+		const enabled = !get_setting_or('enabled', false);
 		await config.update('enabled', enabled, vscode.ConfigurationTarget.Global);
 		void vscode.window.showInformationMessage(`llm-buddy automatic review ${enabled ? 'enabled' : 'disabled'}.`);
 	}));
@@ -110,7 +113,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.toggleQualityCapture', async () => {
 		const config = vscode.workspace.getConfiguration('llmBuddy');
-		const enabled = !getSetting('captureQualityData', false);
+		const enabled = !get_setting_or('captureQualityData', false);
 		await config.update('captureQualityData', enabled, vscode.ConfigurationTarget.Global);
 		void vscode.window.showInformationMessage(`llm-buddy quality capture ${enabled ? 'enabled' : 'disabled'}.`);
 	}));
@@ -129,10 +132,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push({
 		dispose: () => {
-			for (const timer of automaticTimers.values()) {
+			for (const timer of scopeKey_to_automaticTimers.values()) {
 				clearTimeout(timer);
 			}
-			automaticTimers.clear();
+			scopeKey_to_automaticTimers.clear();
 		},
 	});
 }

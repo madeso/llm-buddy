@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { ReviewCapture } from './reviewService';
-import { getSetting } from './settings';
+import { get_setting_or } from './settings';
 
 const lastCaptureKey = 'llmBuddy.quality.lastCapture';
 const casesKey = 'llmBuddy.quality.cases';
@@ -94,7 +94,7 @@ export class QualityService {
 	constructor(private readonly context: vscode.ExtensionContext) {}
 
 	handleCapture(capture: ReviewCapture): void {
-		if (!getSetting('captureQualityData', false)) {
+		if (!get_setting_or('captureQualityData', false)) {
 			return;
 		}
 		void Promise.resolve(this.context.workspaceState.update(lastCaptureKey, capture))
