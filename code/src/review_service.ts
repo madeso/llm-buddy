@@ -383,15 +383,16 @@ export class ReviewService {
 		if (oldTimer) {
 			clearTimeout(oldTimer);
 		}
+		const fix_idle_delay = Math.max(0, get_setting_or('fixIdleDelay', 3));
 		const timer = setTimeout(() => {
 			this.fixTimers.delete(key);
 			void this.runFix(uri, line, problem).catch((error: unknown) => {
 				const message = error instanceof Error ? error.message : String(error);
 				vscode.window.showErrorMessage(`llm-buddy automatic fix failed: ${message}`);
 			});
-		}, Math.max(0, get_setting_or('fixIdleDelay', 3)) * 1000);
+		}, fix_idle_delay * 1000);
 		this.fixTimers.set(key, timer);
-		return `Automatic fix scheduled after ${get_setting_or('fixIdleDelay', 3)} seconds of idle time.`;
+		return `Automatic fix scheduled after ${fix_idle_delay} seconds of idle time.`;
 	}
 
 	private async runFix(uri: string, lineNumber: number, problem: string): Promise<void> {

@@ -20,9 +20,9 @@ export function getScopeDescription(uri: vscode.Uri): string {
 }
 
 export class ChangeTracker implements vscode.Disposable {
-	private readonly chunks = new Map<string, ChangeChunk[]>();
-	private readonly snapshots = new Map<string, string>();
-	private readonly lastReviewed = new Map<string, number>();
+	private readonly chunks = new Map<string, ChangeChunk[]>(); // scope key to changes
+	private readonly snapshots = new Map<string, string>(); // uri to
+	private readonly lastReviewed = new Map<string, number>(); // scope key to revision
 	private readonly disposable: vscode.Disposable;
 	private nextRevision = 1;
 
