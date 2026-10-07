@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
-import { benchmarkCases } from './benchmarkCases';
-import { ChangeTracker, getScopeKey } from './changeTracker';
+import { benchmarkCases } from './benchmark_cases';
+import { ChangeTracker, getScopeKey } from './change_tracker';
 import { NotesManager } from './notes_manager';
-import { ReviewService } from './reviewService';
+import { ReviewService } from './review_service';
 
 interface BenchmarkResult {
 	name: string;

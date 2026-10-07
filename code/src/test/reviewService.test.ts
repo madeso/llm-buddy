@@ -1,8 +1,8 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { ChangeTracker, getScopeKey } from '../changeTracker';
+import { ChangeTracker, getScopeKey } from '../change_tracker';
 import { NotesManager } from '../notes_manager';
-import { ReviewService } from '../reviewService';
+import { ReviewService } from '../review_service';
 import { ChatMessage, LlmProvider, ToolDefinition } from '../types';
 
 suite('Review service', () => {

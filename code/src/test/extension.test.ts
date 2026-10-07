@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { ChangeTracker, getScopeKey } from '../changeTracker';
+import { ChangeTracker, getScopeKey } from '../change_tracker';
 import { reconstructOriginal } from '../diff';
 
 suite('Extension Test Suite', () => {

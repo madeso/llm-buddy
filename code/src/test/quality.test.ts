@@ -6,7 +6,7 @@ import {
 	setCleanJudgment,
 	splitDiffByFile,
 } from '../quality';
-import { ReviewCapture } from '../reviewService';
+import { ReviewCapture } from '../review_service';
 
 suite('Quality judging', () => {
 	const capture: ReviewCapture = {

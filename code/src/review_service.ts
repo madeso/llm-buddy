@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ChangeTracker, getScopeDescription, getScopeKey } from './changeTracker';
+import { ChangeTracker, getScopeDescription, getScopeKey } from './change_tracker';
 import { createNumberedDiff, reconstructOriginal } from './diff';
 import { NoteToolEvent, NotesManager } from './notes_manager';
 import { get_setting_or, is_severity, rank_from_severity } from './settings';

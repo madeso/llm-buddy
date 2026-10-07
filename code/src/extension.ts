@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
-import { BenchmarkService } from './benchmarkService';
-import { ChangeTracker, getScopeKey } from './changeTracker';
+import { BenchmarkService } from './benchmark_service';
+import { ChangeTracker, getScopeKey } from './change_tracker';
 import { NotesManager } from './notes_manager';
 import { apiKeySecretKey, createProvider } from './providers';
 import { QualityService } from './quality';
-import { ReviewService } from './reviewService';
+import { ReviewService } from './review_service';
 import { get_setting_or } from './settings';
 
 export function activate(context: vscode.ExtensionContext): void {

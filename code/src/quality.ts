@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ReviewCapture } from './reviewService';
+import { ReviewCapture } from './review_service';
 import { get_setting_or } from './settings';
 
 const lastCaptureKey = 'llmBuddy.quality.lastCapture';
