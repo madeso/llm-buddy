@@ -61,7 +61,7 @@ interface QualityCapture {
 	items?: QualityDiffItem[];
 }
 
-export function createQualityItems(capture: ReviewCapture): QualityDiffItem[] {
+export const createQualityItems = (capture: ReviewCapture): QualityDiffItem[]  => {
 	const segments = splitDiffByFile(capture.diff);
 	return segments.map((segment, id) => {
 		const header = segment.split(/\r?\n/, 1)[0] ?? '';
@@ -81,9 +81,9 @@ export function createQualityItems(capture: ReviewCapture): QualityDiffItem[] {
 				.map(({ line, message, severity }) => ({ line, message, severity })),
 		};
 	});
-}
+};
 
-export function splitDiffByFile(diff: string): string[] {
+export const splitDiffByFile = (diff: string): string[] => {
 	const starts: number[] = [];
 	const headerPattern = /^=== File:/gm;
 	for (let match = headerPattern.exec(diff); match; match = headerPattern.exec(diff)) {
@@ -94,21 +94,21 @@ export function splitDiffByFile(diff: string): string[] {
 		return trimmed ? [trimmed] : [];
 	}
 	return starts.map((start, index) => diff.slice(start, starts[index + 1] ?? diff.length).trimEnd());
-}
+};
 
-export function setCleanJudgment(item: QualityDiffItem): void {
+export const setCleanJudgment = (item: QualityDiffItem): void => {
 	item.judgment = { kind: 'clean', warnings: [] };
-}
+};
 
-export function addExpectedWarning(item: QualityDiffItem, warning: ExpectedWarning): void {
+export const addExpectedWarning = (item: QualityDiffItem, warning: ExpectedWarning): void => {
 	const warnings = item.judgment?.kind === 'warnings' ? [...item.judgment.warnings] : [];
 	warnings.push(warning);
 	item.judgment = { kind: 'warnings', warnings };
-}
+};
 
-export function clearJudgment(item: QualityDiffItem): void {
+export const clearJudgment = (item: QualityDiffItem): void => {
 	delete item.judgment;
-}
+};
 
 const judgmentActions = (
 	item: QualityDiffItem,
