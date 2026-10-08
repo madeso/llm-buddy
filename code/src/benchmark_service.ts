@@ -91,7 +91,14 @@ type FileFilters = { [name: string]: string[] };
 const FILTERS_MD : FileFilters = { Markdown: ['md'] };
 const FILTERS_HTML = { HTML: ['html'] };
 
-export const save_file = async (default_file_name: string, filters: FileFilters, content: string, ok_message: string): Promise<void> => {
+interface SaveArgs {
+	default_file_name: string;
+	filters: FileFilters;
+	content: string;
+	ok_message: string;
+}
+export const save_file = async (args: SaveArgs): Promise<void> => {
+	const {default_file_name, filters, content, ok_message} = args;
 	const target = await vscode.window.showSaveDialog({
 		defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0].uri ?? vscode.Uri.file(''), default_file_name),
 		filters,
@@ -107,9 +114,21 @@ const PLEASE_RUN_BENCHMARKS = 'Run llm-buddy benchmarks before exporting a repor
 
 const has_results = (results: BenchmarkResult[]): boolean => results.length !== 0;
 
+type BenchmarkExportArgs = Omit<SaveArgs, 'content'>;
+const BENCHMARK_EXPORT_MD : BenchmarkExportArgs = {
+	default_file_name: 'llm-buddy-benchmark.md',
+	filters: FILTERS_MD,
+	ok_message: 'llm-buddy benchmark report exported.'
+};
+const BENCHMARK_EXPORT_HTML : BenchmarkExportArgs = {
+	default_file_name: 'llm-buddy-benchmark.html',
+	filters: FILTERS_HTML,
+	ok_message: 'llm-buddy HTML benchmark report exported.'
+};
+
 export const benchmark_exportReport = async (results: BenchmarkResult[]): Promise<void> => {
 	if (has_results(results)) {
-		await save_file('llm-buddy-benchmark.md', FILTERS_MD, generate_report_md(results), 'llm-buddy benchmark report exported.');
+		await save_file({...BENCHMARK_EXPORT_MD, content: generate_report_md(results)});
 	}
 	else {
 		vscode.window.showInformationMessage(PLEASE_RUN_BENCHMARKS);
@@ -118,7 +137,7 @@ export const benchmark_exportReport = async (results: BenchmarkResult[]): Promis
 
 export const benchmark_exportHtmlReport = async (results: BenchmarkResult[]): Promise<void> => {
 	if (has_results(results)) {
-		await save_file('llm-buddy-benchmark.html', FILTERS_HTML, generate_report_html(results), 'llm-buddy HTML benchmark report exported.');
+		await save_file({...BENCHMARK_EXPORT_HTML, content: generate_report_html(results)});
 	}
 	else {
 		vscode.window.showInformationMessage(PLEASE_RUN_BENCHMARKS);
