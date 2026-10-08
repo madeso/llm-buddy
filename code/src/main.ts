@@ -14,7 +14,6 @@ export function activate(context: vscode.ExtensionContext): void {
 	const review_service = new ReviewService(change_tracker, notes_manager, () => createProvider(context));
 	const quality_service = new QualityService(context);
 	const benchmark_status: BenchmarkStatus = {
-		lastReport: '',
 		lastResults: [],
 		running: false
 	};
@@ -132,8 +131,8 @@ export function activate(context: vscode.ExtensionContext): void {
 			vscode.window.showErrorMessage(`llm-buddy benchmark failed: ${message}`);
 		}
 	}));
-	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportBenchmarkReport', () => benchmark_exportReport(benchmark_status)));
-	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportBenchmarkHtmlReport', () => benchmark_exportHtmlReport(benchmark_status)));
+	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportBenchmarkReport', () => benchmark_exportReport(benchmark_status.lastResults)));
+	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportBenchmarkHtmlReport', () => benchmark_exportHtmlReport(benchmark_status.lastResults)));
 
 	context.subscriptions.push({
 		dispose: () => {

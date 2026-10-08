@@ -14,7 +14,6 @@ interface BenchmarkResult {
 }
 
 export interface BenchmarkStatus {
-	lastReport: string;
 	lastResults: BenchmarkResult[];
 	running: boolean;
 }
@@ -80,47 +79,53 @@ export const benchmark_run = async (self: BenchmarkStatus, selfOutput: vscode.Ou
 			}
 		}
 		self.lastResults = results;
-		self.lastReport = formatMarkdownReport(results);
-		selfOutput.appendLine(self.lastReport);
+		const markdown_report = generate_report_md(results);
+		selfOutput.appendLine(markdown_report);
 		vscode.window.showInformationMessage('llm-buddy benchmark run complete.');
 	} finally {
 		self.running = false;
 	}
 };
 
-export const benchmark_exportReport = async (self: BenchmarkStatus): Promise<void> => {
-	if (!self.lastReport) {
-		vscode.window.showInformationMessage('Run llm-buddy benchmarks before exporting a report.');
-		return;
-	}
+type FileFilters = { [name: string]: string[] };
+const FILTERS_MD : FileFilters = { Markdown: ['md'] };
+const FILTERS_HTML = { HTML: ['html'] };
+
+export const save_file = async (default_file_name: string, filters: FileFilters, content: string, ok_message: string): Promise<void> => {
 	const target = await vscode.window.showSaveDialog({
-		defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0].uri ?? vscode.Uri.file(''), 'llm-buddy-benchmark.md'),
-		filters: { Markdown: ['md'] },
+		defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0].uri ?? vscode.Uri.file(''), default_file_name),
+		filters,
 	});
 	if (!target) {
 		return;
 	}
-	await vscode.workspace.fs.writeFile(target, Buffer.from(self.lastReport, 'utf8'));
-	vscode.window.showInformationMessage('llm-buddy benchmark report exported.');
+	await vscode.workspace.fs.writeFile(target, Buffer.from(content, 'utf8'));
+	vscode.window.showInformationMessage(ok_message);
 };
 
-export const benchmark_exportHtmlReport = async (self: BenchmarkStatus): Promise<void> => {
-	if (self.lastResults.length === 0) {
-		vscode.window.showInformationMessage('Run llm-buddy benchmarks before exporting a report.');
-		return;
+const PLEASE_RUN_BENCHMARKS = 'Run llm-buddy benchmarks before exporting a report.';
+
+const has_results = (results: BenchmarkResult[]): boolean => results.length !== 0;
+
+export const benchmark_exportReport = async (results: BenchmarkResult[]): Promise<void> => {
+	if (has_results(results)) {
+		await save_file('llm-buddy-benchmark.md', FILTERS_MD, generate_report_md(results), 'llm-buddy benchmark report exported.');
 	}
-	const target = await vscode.window.showSaveDialog({
-		defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0].uri ?? vscode.Uri.file(''), 'llm-buddy-benchmark.html'),
-		filters: { HTML: ['html'] },
-	});
-	if (!target) {
-		return;
+	else {
+		vscode.window.showInformationMessage(PLEASE_RUN_BENCHMARKS);
 	}
-	await vscode.workspace.fs.writeFile(target, Buffer.from(formatHtmlReport(self.lastResults), 'utf8'));
-	vscode.window.showInformationMessage('llm-buddy HTML benchmark report exported.');
 };
 
-const formatMarkdownReport = (results: BenchmarkResult[]): string => {
+export const benchmark_exportHtmlReport = async (results: BenchmarkResult[]): Promise<void> => {
+	if (has_results(results)) {
+		await save_file('llm-buddy-benchmark.html', FILTERS_HTML, generate_report_html(results), 'llm-buddy HTML benchmark report exported.');
+	}
+	else {
+		vscode.window.showInformationMessage(PLEASE_RUN_BENCHMARKS);
+	}
+};
+
+const generate_report_md = (results: BenchmarkResult[]): string => {
 	const truePositives = results.reduce((total, result) => total + result.truePositives, 0);
 	const falsePositives = results.reduce((total, result) => total + result.falsePositives, 0);
 	const falseNegatives = results.reduce((total, result) => total + result.falseNegatives, 0);
@@ -153,7 +158,7 @@ const escapeMarkdown = (text: string): string => {
 	return text.replaceAll('|', '\\|').replaceAll('\n', ' ');
 };
 
-const formatHtmlReport = (results: BenchmarkResult[]): string => {
+const generate_report_html = (results: BenchmarkResult[]): string => {
 	const truePositives = results.reduce((total, result) => total + result.truePositives, 0);
 	const falsePositives = results.reduce((total, result) => total + result.falsePositives, 0);
 	const falseNegatives = results.reduce((total, result) => total + result.falseNegatives, 0);
