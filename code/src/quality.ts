@@ -97,21 +97,21 @@ export class QualityService {
 		if (!get_setting_or('captureQualityData', false)) {
 			return;
 		}
-		void Promise.resolve(this.context.workspaceState.update(lastCaptureKey, capture))
+		Promise.resolve(this.context.workspaceState.update(lastCaptureKey, capture))
 			.catch((error: unknown) => console.error('llm-buddy could not save review capture:', error));
 	}
 
 	async judgeLastCapture(): Promise<void> {
 		const saved = this.context.workspaceState.get<QualityCapture | ReviewCapture | undefined>(lastCaptureKey);
 		if (!saved) {
-			void vscode.window.showInformationMessage('No saved review capture; enable quality capture and run a review first.');
+			vscode.window.showInformationMessage('No saved review capture; enable quality capture and run a review first.');
 			return;
 		}
 		const capture = 'capture' in saved ? saved.capture : saved;
 		const items = ('items' in saved && saved.items?.length ? saved.items : createQualityItems(capture))
 			.map((item) => ({ ...item, actualNotes: item.actualNotes.map((note) => ({ ...note })) }));
 		if (items.length === 0) {
-			void vscode.window.showInformationMessage('The saved review has no diff sections to judge.');
+			vscode.window.showInformationMessage('The saved review has no diff sections to judge.');
 			return;
 		}
 		let index = 0;
@@ -242,13 +242,13 @@ export class QualityService {
 			capture: judgedCase.capture,
 			items: judgedCase.items,
 		});
-		void vscode.window.showInformationMessage('llm-buddy quality judgment saved.');
+		vscode.window.showInformationMessage('llm-buddy quality judgment saved.');
 	}
 
 	async exportCases(): Promise<void> {
 		const cases = this.context.workspaceState.get<JudgedQualityCase[]>(casesKey, []);
 		if (cases.length === 0) {
-			void vscode.window.showInformationMessage('There are no judged quality cases to export.');
+			vscode.window.showInformationMessage('There are no judged quality cases to export.');
 			return;
 		}
 		const target = await vscode.window.showSaveDialog({
@@ -259,7 +259,7 @@ export class QualityService {
 			return;
 		}
 		await vscode.workspace.fs.writeFile(target, Buffer.from(JSON.stringify(cases, null, 2), 'utf8'));
-		void vscode.window.showInformationMessage(`Exported ${cases.length} quality case(s).`);
+		vscode.window.showInformationMessage(`Exported ${cases.length} quality case(s).`);
 	}
 }
 

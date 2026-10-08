@@ -82,7 +82,7 @@ export const benchmark_run = async (self: BenchmarkStatus, selfOutput: vscode.Ou
 		self.lastResults = results;
 		self.lastReport = formatMarkdownReport(results);
 		selfOutput.appendLine(self.lastReport);
-		void vscode.window.showInformationMessage('llm-buddy benchmark run complete.');
+		vscode.window.showInformationMessage('llm-buddy benchmark run complete.');
 	} finally {
 		self.running = false;
 	}
@@ -90,7 +90,7 @@ export const benchmark_run = async (self: BenchmarkStatus, selfOutput: vscode.Ou
 
 export const benchmark_exportReport = async (self: BenchmarkStatus): Promise<void> => {
 	if (!self.lastReport) {
-		void vscode.window.showInformationMessage('Run llm-buddy benchmarks before exporting a report.');
+		vscode.window.showInformationMessage('Run llm-buddy benchmarks before exporting a report.');
 		return;
 	}
 	const target = await vscode.window.showSaveDialog({
@@ -101,12 +101,12 @@ export const benchmark_exportReport = async (self: BenchmarkStatus): Promise<voi
 		return;
 	}
 	await vscode.workspace.fs.writeFile(target, Buffer.from(self.lastReport, 'utf8'));
-	void vscode.window.showInformationMessage('llm-buddy benchmark report exported.');
+	vscode.window.showInformationMessage('llm-buddy benchmark report exported.');
 };
 
 export const benchmark_exportHtmlReport = async (self: BenchmarkStatus): Promise<void> => {
 	if (self.lastResults.length === 0) {
-		void vscode.window.showInformationMessage('Run llm-buddy benchmarks before exporting a report.');
+		vscode.window.showInformationMessage('Run llm-buddy benchmarks before exporting a report.');
 		return;
 	}
 	const target = await vscode.window.showSaveDialog({
@@ -117,7 +117,7 @@ export const benchmark_exportHtmlReport = async (self: BenchmarkStatus): Promise
 		return;
 	}
 	await vscode.workspace.fs.writeFile(target, Buffer.from(formatHtmlReport(self.lastResults), 'utf8'));
-	void vscode.window.showInformationMessage('llm-buddy HTML benchmark report exported.');
+	vscode.window.showInformationMessage('llm-buddy HTML benchmark report exported.');
 };
 
 function formatMarkdownReport(results: BenchmarkResult[]): string {

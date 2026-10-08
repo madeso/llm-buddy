@@ -49,7 +49,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			const document = find_openDocument_from_ScopeKey(scopeKey);
 			if (document) {
 				scopeKey_to_lastAutomaticRuns.set(scopeKey, Date.now());
-				void review_service.review(document.uri);
+				review_service.review(document.uri);
 			}
 		}, Math.max(0, delay_in_seconds) * 1000);
 		scopeKey_to_automaticTimers.set(scopeKey, timer);
@@ -68,14 +68,14 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.reviewChanges', async () => {
 		const editor = vscode.window.activeTextEditor;
 		if (!editor) {
-			void vscode.window.showInformationMessage('llm-buddy: open a document to review its changes.');
+			vscode.window.showInformationMessage('llm-buddy: open a document to review its changes.');
 			return;
 		}
 		await review_service.review(editor.document.uri);
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.clearHistory', () => {
 		change_tracker.clearHistory();
-		void vscode.window.showInformationMessage('llm-buddy change history cleared.');
+		vscode.window.showInformationMessage('llm-buddy change history cleared.');
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand(
 		'llmBuddy.dismissNoteAt',
@@ -86,7 +86,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 			const editor = vscode.window.activeTextEditor;
 			if (!editor || !notes_manager.dismissAt(editor.document.uri.toString(), editor.selection.active.line)) {
-				void vscode.window.showInformationMessage('No llm-buddy note on the current line.');
+				vscode.window.showInformationMessage('No llm-buddy note on the current line.');
 			}
 		},
 	));
@@ -97,7 +97,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		const config = vscode.workspace.getConfiguration('llmBuddy');
 		const enabled = !get_setting_or('enabled', false);
 		await config.update('enabled', enabled, vscode.ConfigurationTarget.Global);
-		void vscode.window.showInformationMessage(`llm-buddy automatic review ${enabled ? 'enabled' : 'disabled'}.`);
+		vscode.window.showInformationMessage(`llm-buddy automatic review ${enabled ? 'enabled' : 'disabled'}.`);
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.setApiKey', async () => {
 		const apiKey = await vscode.window.showInputBox({
@@ -110,17 +110,17 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 		if (apiKey) {
 			await context.secrets.store(apiKeySecretKey, apiKey);
-			void vscode.window.showInformationMessage('llm-buddy API key saved in VS Code SecretStorage.');
+			vscode.window.showInformationMessage('llm-buddy API key saved in VS Code SecretStorage.');
 		} else {
 			await context.secrets.delete(apiKeySecretKey);
-			void vscode.window.showInformationMessage('llm-buddy API key cleared.');
+			vscode.window.showInformationMessage('llm-buddy API key cleared.');
 		}
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.toggleQualityCapture', async () => {
 		const config = vscode.workspace.getConfiguration('llmBuddy');
 		const enabled = !get_setting_or('captureQualityData', false);
 		await config.update('captureQualityData', enabled, vscode.ConfigurationTarget.Global);
-		void vscode.window.showInformationMessage(`llm-buddy quality capture ${enabled ? 'enabled' : 'disabled'}.`);
+		vscode.window.showInformationMessage(`llm-buddy quality capture ${enabled ? 'enabled' : 'disabled'}.`);
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.judgeLastReview', () => quality_service.judgeLastCapture()));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportQualityCases', () => quality_service.exportCases()));
@@ -129,7 +129,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			await benchmark_run(benchmark_status, benchmark_output, change_tracker, notes_manager, review_service);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			void vscode.window.showErrorMessage(`llm-buddy benchmark failed: ${message}`);
+			vscode.window.showErrorMessage(`llm-buddy benchmark failed: ${message}`);
 		}
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportBenchmarkReport', () => benchmark_exportReport(benchmark_status)));

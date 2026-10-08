@@ -107,7 +107,7 @@ export class ReviewService {
 	}
 
 	message(m: string) {
-		void vscode.window.showInformationMessage(`llm-buddy: ${m}`);
+		vscode.window.showInformationMessage(`llm-buddy: ${m}`);
 	}
 
 	async review(uri: vscode.Uri, showMessages = true): Promise<ReviewCapture | undefined> {
@@ -386,7 +386,7 @@ export class ReviewService {
 		const fix_idle_delay = Math.max(0, get_setting_or('fixIdleDelay', 3));
 		const timer = setTimeout(() => {
 			this.fixTimers.delete(key);
-			void this.runFix(uri, line, problem).catch((error: unknown) => {
+			this.runFix(uri, line, problem).catch((error: unknown) => {
 				const message = error instanceof Error ? error.message : String(error);
 				vscode.window.showErrorMessage(`llm-buddy automatic fix failed: ${message}`);
 			});

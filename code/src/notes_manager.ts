@@ -226,7 +226,7 @@ export class NotesManager implements vscode.Disposable {
 	}
 
 	private persist(): void {
-		void Promise.resolve(this.context.workspaceState.update(notesStorageKey, this.notes))
+		Promise.resolve(this.context.workspaceState.update(notesStorageKey, this.notes))
 			.catch((error: unknown) => console.error('llm-buddy could not persist note history:', error));
 	}
 
