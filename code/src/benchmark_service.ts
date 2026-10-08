@@ -120,7 +120,7 @@ export const benchmark_exportHtmlReport = async (self: BenchmarkStatus): Promise
 	vscode.window.showInformationMessage('llm-buddy HTML benchmark report exported.');
 };
 
-function formatMarkdownReport(results: BenchmarkResult[]): string {
+const formatMarkdownReport = (results: BenchmarkResult[]): string => {
 	const truePositives = results.reduce((total, result) => total + result.truePositives, 0);
 	const falsePositives = results.reduce((total, result) => total + result.falsePositives, 0);
 	const falseNegatives = results.reduce((total, result) => total + result.falseNegatives, 0);
@@ -147,13 +147,13 @@ function formatMarkdownReport(results: BenchmarkResult[]): string {
 		]),
 	];
 	return lines.join('\n');
-}
+};
 
-function escapeMarkdown(text: string): string {
+const escapeMarkdown = (text: string): string => {
 	return text.replaceAll('|', '\\|').replaceAll('\n', ' ');
-}
+};
 
-function formatHtmlReport(results: BenchmarkResult[]): string {
+const formatHtmlReport = (results: BenchmarkResult[]): string => {
 	const truePositives = results.reduce((total, result) => total + result.truePositives, 0);
 	const falsePositives = results.reduce((total, result) => total + result.falsePositives, 0);
 	const falseNegatives = results.reduce((total, result) => total + result.falseNegatives, 0);
@@ -170,8 +170,8 @@ function formatHtmlReport(results: BenchmarkResult[]): string {
 <p class="summary">Precision: ${precision.toFixed(3)} · Recall: ${recall.toFixed(3)} · F1: ${f1.toFixed(3)}</p>
 <table><thead><tr><th>Case</th><th>TP</th><th>FP</th><th>FN</th><th>Seconds</th><th>Notes</th></tr></thead><tbody>${rows}</tbody></table>
 </html>`;
-}
+};
 
-function escapeHtml(text: string): string {
+const escapeHtml = (text: string): string => {
 	return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
-}
+};
