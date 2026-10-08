@@ -8,18 +8,18 @@ import { ReviewService } from './review_service';
 import { get_setting_or } from './settings';
 
 export function activate(context: vscode.ExtensionContext): void {
-	const tracker = new ChangeTracker(get_setting_or('coalesceWindow', 180));
-	const notes = new NotesManager(context);
+	const change_tracker = new ChangeTracker(get_setting_or('coalesceWindow', 180));
+	const notes_manager = new NotesManager(context);
 
-	const reviews = new ReviewService(tracker, notes, () => createProvider(context));
-	const quality = new QualityService(context);
-	const benchmarks = new BenchmarkService(tracker, notes, reviews);
+	const review_service = new ReviewService(change_tracker, notes_manager, () => createProvider(context));
+	const quality_service = new QualityService(context);
+	const benchmark_service = new BenchmarkService(change_tracker, notes_manager, review_service);
 
 	const scopeKey_to_automaticTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	const scopeKey_to_lastAutomaticRuns = new Map<string, number>();
 
-	context.subscriptions.push(tracker, notes, reviews, benchmarks);
-	reviews.setCaptureHandler((capture) => quality.handleCapture(capture));
+	context.subscriptions.push(change_tracker, notes_manager, review_service, benchmark_service);
+	review_service.setCaptureHandler((capture) => quality_service.handleCapture(capture));
 
 	const find_openDocument_from_ScopeKey = (scopeKey: string): vscode.TextDocument | undefined =>
 		vscode.workspace.textDocuments.find((document) => getScopeKey(document.uri) === scopeKey);
@@ -44,13 +44,13 @@ export function activate(context: vscode.ExtensionContext): void {
 			const document = find_openDocument_from_ScopeKey(scopeKey);
 			if (document) {
 				scopeKey_to_lastAutomaticRuns.set(scopeKey, Date.now());
-				void reviews.review(document.uri);
+				void review_service.review(document.uri);
 			}
 		}, Math.max(0, delay_in_seconds) * 1000);
 		scopeKey_to_automaticTimers.set(scopeKey, timer);
 	};
 
-	notes.setEditedHandler((scopeKey) => {
+	notes_manager.setEditedHandler((scopeKey) => {
 		scheduleReview(scopeKey, get_setting_or('autoIdleDelay', 10));
 	});
 
@@ -66,27 +66,27 @@ export function activate(context: vscode.ExtensionContext): void {
 			void vscode.window.showInformationMessage('llm-buddy: open a document to review its changes.');
 			return;
 		}
-		await reviews.review(editor.document.uri);
+		await review_service.review(editor.document.uri);
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.clearHistory', () => {
-		tracker.clearHistory();
+		change_tracker.clearHistory();
 		void vscode.window.showInformationMessage('llm-buddy change history cleared.');
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand(
 		'llmBuddy.dismissNoteAt',
 		(uriString?: string, line?: number) => {
 			if (uriString && typeof line === 'number') {
-				notes.dismissAt(uriString, line);
+				notes_manager.dismissAt(uriString, line);
 				return;
 			}
 			const editor = vscode.window.activeTextEditor;
-			if (!editor || !notes.dismissAt(editor.document.uri.toString(), editor.selection.active.line)) {
+			if (!editor || !notes_manager.dismissAt(editor.document.uri.toString(), editor.selection.active.line)) {
 				void vscode.window.showInformationMessage('No llm-buddy note on the current line.');
 			}
 		},
 	));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.dismissAllNotes', () => {
-		notes.dismissAll();
+		notes_manager.dismissAll();
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.toggleAutomaticReview', async () => {
 		const config = vscode.workspace.getConfiguration('llmBuddy');
@@ -117,18 +117,18 @@ export function activate(context: vscode.ExtensionContext): void {
 		await config.update('captureQualityData', enabled, vscode.ConfigurationTarget.Global);
 		void vscode.window.showInformationMessage(`llm-buddy quality capture ${enabled ? 'enabled' : 'disabled'}.`);
 	}));
-	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.judgeLastReview', () => quality.judgeLastCapture()));
-	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportQualityCases', () => quality.exportCases()));
+	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.judgeLastReview', () => quality_service.judgeLastCapture()));
+	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportQualityCases', () => quality_service.exportCases()));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.runBenchmarks', async () => {
 		try {
-			await benchmarks.run();
+			await benchmark_service.run();
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			void vscode.window.showErrorMessage(`llm-buddy benchmark failed: ${message}`);
 		}
 	}));
-	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportBenchmarkReport', () => benchmarks.exportReport()));
-	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportBenchmarkHtmlReport', () => benchmarks.exportHtmlReport()));
+	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportBenchmarkReport', () => benchmark_service.exportReport()));
+	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportBenchmarkHtmlReport', () => benchmark_service.exportHtmlReport()));
 
 	context.subscriptions.push({
 		dispose: () => {
