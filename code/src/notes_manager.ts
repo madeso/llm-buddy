@@ -1,16 +1,7 @@
 import * as vscode from 'vscode';
-import { NoteStatus, ReviewNote, Severity } from './types';
+import { NoteStatus, NoteToolEvent, ReviewNote, Severity } from './types';
 
 const notesStorageKey = 'llmBuddy.notes';
-
-export interface NoteToolEvent {
-	tool: 'add_note' | 'update_note' | 'remove_note';
-	noteId: number;
-	scopeKey: string;
-	uri: string;
-	line?: number;
-	message?: string;
-}
 
 export class NotesManager implements vscode.Disposable {
 	private readonly notes: ReviewNote[];

@@ -16,6 +16,34 @@ export interface ReviewNote {
 	dismissedReason?: string;
 }
 
+export interface NoteToolEvent {
+	tool: 'add_note' | 'update_note' | 'remove_note';
+	noteId: number;
+	scopeKey: string;
+	uri: string;
+	line?: number;
+	message?: string;
+}
+
+export interface ReviewCapture {
+	scopeKey: string;
+	provider: string;
+	startedAt: number;
+	finishedAt?: number;
+	diff: string;
+	responses: ChatMessage[];
+	toolEvents: NoteToolEvent[];
+	files: Array<{ uri: string; file: string; language: string }>;
+	notes: Array<{
+		id: number;
+		uri: string;
+		line: number;
+		message: string;
+		severity: Severity;
+	}>;
+	judgment?: { kind: 'clean' | 'warnings'; warnings?: string };
+}
+
 export interface ChangeChunk {
 	uri: string;
 	scopeKey: string;

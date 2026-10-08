@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { ReviewCapture } from './review_service';
 import { get_setting_or } from './settings';
+import { ReviewCapture } from './types';
 
 const LAST_CAPTURE_KEY = 'llmBuddy.quality.lastCapture';
 type Capture =

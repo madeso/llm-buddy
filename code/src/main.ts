@@ -4,7 +4,7 @@ import { ChangeTracker, getScopeKey } from './change_tracker';
 import { NotesManager } from './notes_manager';
 import { apiKeySecretKey, createProvider } from './providers';
 import { quality_exportCases, quality_handleCapture, quality_judgeLastCapture } from './quality';
-import { ReviewService } from './review_service';
+import { ReviewFunction, ReviewService } from './review_service';
 import { get_setting_or } from './settings';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -24,6 +24,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(change_tracker, notes_manager, review_service, benchmark_output);
 	review_service.setCaptureHandler((capture) => quality_handleCapture(context, capture));
+	const review_function : ReviewFunction = async (uri, show) => await review_service.review(uri, show);
 
 	const find_openDocument_from_ScopeKey = (scopeKey: string): vscode.TextDocument | undefined =>
 		vscode.workspace.textDocuments.find((document) => getScopeKey(document.uri) === scopeKey);
@@ -48,7 +49,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			const document = find_openDocument_from_ScopeKey(scopeKey);
 			if (document) {
 				scopeKey_to_lastAutomaticRuns.set(scopeKey, Date.now());
-				review_service.review(document.uri);
+				review_function(document.uri, "show_messages");
 			}
 		}, Math.max(0, delay_in_seconds) * 1000);
 		scopeKey_to_automaticTimers.set(scopeKey, timer);
@@ -70,7 +71,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			vscode.window.showInformationMessage('llm-buddy: open a document to review its changes.');
 			return;
 		}
-		await review_service.review(editor.document.uri);
+		await review_function(editor.document.uri, "show_messages");
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.clearHistory', () => {
 		change_tracker.clearHistory();
@@ -125,7 +126,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportQualityCases', () => quality_exportCases(context)));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.runBenchmarks', async () => {
 		try {
-			await benchmark_run(benchmark_status, benchmark_output, change_tracker, notes_manager, review_service);
+			await benchmark_run(benchmark_status, benchmark_output, change_tracker, notes_manager, review_function);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			vscode.window.showErrorMessage(`llm-buddy benchmark failed: ${message}`);

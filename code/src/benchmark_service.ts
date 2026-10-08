@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { benchmarkCases } from './benchmark_cases';
 import { ChangeTracker, getScopeKey } from './change_tracker';
 import { NotesManager } from './notes_manager';
-import { ReviewService } from './review_service';
+import { ReviewFunction } from './review_service';
 
 interface BenchmarkResult {
 	name: string;
@@ -18,7 +18,7 @@ export interface BenchmarkStatus {
 	running: boolean;
 }
 
-export const benchmark_run = async (self: BenchmarkStatus, selfOutput: vscode.OutputChannel, selfTracker: ChangeTracker, selfNotes: NotesManager, selfReviews: ReviewService): Promise<void> => {
+export const benchmark_run = async (self: BenchmarkStatus, selfOutput: vscode.OutputChannel, selfTracker: ChangeTracker, selfNotes: NotesManager, review_service: ReviewFunction): Promise<void> => {
 	if (self.running) {
 		throw new Error('A benchmark run is already in progress.');
 	}
@@ -43,7 +43,7 @@ export const benchmark_run = async (self: BenchmarkStatus, selfOutput: vscode.Ou
 				if (!await vscode.workspace.applyEdit(edit)) {
 					throw new Error(`Could not prepare benchmark document: ${benchmarkCase.name}`);
 				}
-				await selfReviews.review(uri, false);
+				await review_service(uri, "hide_messages");
 				const found = selfNotes.list(scopeKey).filter((note) => note.status === 'active');
 				const matched = new Set<number>();
 				let truePositives = 0;

@@ -46,19 +46,19 @@ suite('Review service', () => {
 				};
 			},
 		};
-		const reviews = new ReviewService(tracker, notes, async () => provider);
+		const review_service = new ReviewService(tracker, notes, async () => provider);
 		const edit = new vscode.WorkspaceEdit();
 		edit.replace(document.uri, new vscode.Range(0, 0, 0, 3), 'new');
 		try {
 			assert.strictEqual(await vscode.workspace.applyEdit(edit), true);
-			const capture = await reviews.review(document.uri, false);
+			const capture = await review_service.review(document.uri, "hide_messages");
 			assert.ok(capture);
 			assert.strictEqual(capture.responses.length, 2);
 			assert.strictEqual(capture.toolEvents[0].tool, 'add_note');
 			assert.strictEqual(notes.list(getScopeKey(document.uri))[0].message, 'The value is incorrect.');
 			assert.strictEqual(tracker.getChanges(getScopeKey(document.uri)).length, 0);
 		} finally {
-			reviews.dispose();
+			review_service.dispose();
 			notes.dispose();
 			tracker.dispose();
 		}

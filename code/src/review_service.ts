@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ChangeTracker, getScopeDescription, getScopeKey } from './change_tracker';
 import { createNumberedDiff, reconstructOriginal } from './diff';
-import { NoteToolEvent, NotesManager } from './notes_manager';
+import { NotesManager } from './notes_manager';
 import { get_setting_or, is_severity, rank_from_severity } from './settings';
 import {
 	ChatMessage,
@@ -10,6 +10,8 @@ import {
 	Severity,
 	ToolCall,
 	ToolDefinition,
+	ReviewCapture,
+	NoteToolEvent,
 } from './types';
 
 
@@ -88,6 +90,10 @@ const reviewTools: ToolDefinition[] = [
 	},
 ];
 
+type ShowMessage = "show_messages" | "hide_messages";
+
+export type ReviewFunction = (uri: vscode.Uri, showMessages : ShowMessage) => Promise<ReviewCapture | undefined>;
+
 export class ReviewService {
 	private readonly activeScopes = new Set<string>();
 	private readonly fixTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -106,11 +112,7 @@ export class ReviewService {
 		this.captureHandler = handler;
 	}
 
-	message(m: string) {
-		vscode.window.showInformationMessage(`llm-buddy: ${m}`);
-	}
-
-	async review(uri: vscode.Uri, showMessages = true): Promise<ReviewCapture | undefined> {
+	async review(uri: vscode.Uri, showMessages: ShowMessage): Promise<ReviewCapture | undefined> {
 		console.log("starting review");
 		const scopeKey = getScopeKey(uri);
 		if (this.activeScopes.has(scopeKey)) {
@@ -121,7 +123,7 @@ export class ReviewService {
 		const changes = this.tracker.getChanges(scopeKey);
 		const reviewedRevision = this.tracker.getLatestRevision(scopeKey);
 		if (changes.length === 0) {
-			if (showMessages) {
+			if (showMessages === 'show_messages') {
 				vscode.window.showInformationMessage('llm-buddy: no new edits to review in this scope.');
 			}
 			return undefined;
@@ -129,7 +131,7 @@ export class ReviewService {
 		const diff = this.formatChanges(changes);
 		if (!diff.trim()) {
 			this.tracker.markReviewed(scopeKey, reviewedRevision);
-			if (showMessages) {
+			if (showMessages === 'show_messages') {
 				vscode.window.showInformationMessage('llm-buddy: no net changes to review.');
 			}
 			return undefined;
@@ -156,7 +158,7 @@ export class ReviewService {
 			capture.provider = get_setting_or('provider', 'openai-compatible');
 			await this.runConversation(provider, scopeKey, changes, diff, reviewedRevision, capture);
 		} catch (error) {
-			if (!showMessages) {
+			if (showMessages === 'hide_messages') {
 				throw error;
 			}
 			const message = error instanceof Error ? error.message : String(error);
@@ -471,25 +473,6 @@ export class ReviewService {
 		}
 		this.fixTimers.clear();
 	}
-}
-
-export interface ReviewCapture {
-	scopeKey: string;
-	provider: string;
-	startedAt: number;
-	finishedAt?: number;
-	diff: string;
-	responses: ChatMessage[];
-	toolEvents: NoteToolEvent[];
-	files: Array<{ uri: string; file: string; language: string }>;
-	notes: Array<{
-		id: number;
-		uri: string;
-		line: number;
-		message: string;
-		severity: Severity;
-	}>;
-	judgment?: { kind: 'clean' | 'warnings'; warnings?: string };
 }
 
 function validLine(value: unknown, fallback: number): number {
