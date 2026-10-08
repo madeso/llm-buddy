@@ -3,7 +3,7 @@ import { benchmark_exportHtmlReport, benchmark_exportReport, benchmark_run, Benc
 import { ChangeTracker, getScopeKey } from './change_tracker';
 import { NotesManager } from './notes_manager';
 import { apiKeySecretKey, createProvider } from './providers';
-import { QualityService } from './quality';
+import { quality_exportCases, quality_handleCapture, quality_judgeLastCapture } from './quality';
 import { ReviewService } from './review_service';
 import { get_setting_or } from './settings';
 
@@ -12,7 +12,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	const notes_manager = new NotesManager(context);
 
 	const review_service = new ReviewService(change_tracker, notes_manager, () => createProvider(context));
-	const quality_service = new QualityService(context);
+	
 	const benchmark_status: BenchmarkStatus = {
 		lastResults: [],
 		running: false
@@ -23,7 +23,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	const scopeKey_to_lastAutomaticRuns = new Map<string, number>();
 
 	context.subscriptions.push(change_tracker, notes_manager, review_service, benchmark_output);
-	review_service.setCaptureHandler((capture) => quality_service.handleCapture(capture));
+	review_service.setCaptureHandler((capture) => quality_handleCapture(context, capture));
 
 	const find_openDocument_from_ScopeKey = (scopeKey: string): vscode.TextDocument | undefined =>
 		vscode.workspace.textDocuments.find((document) => getScopeKey(document.uri) === scopeKey);
@@ -121,8 +121,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		await config.update('captureQualityData', enabled, vscode.ConfigurationTarget.Global);
 		vscode.window.showInformationMessage(`llm-buddy quality capture ${enabled ? 'enabled' : 'disabled'}.`);
 	}));
-	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.judgeLastReview', () => quality_service.judgeLastCapture()));
-	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportQualityCases', () => quality_service.exportCases()));
+	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.judgeLastReview', () => quality_judgeLastCapture(context)));
+	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportQualityCases', () => quality_exportCases(context)));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.runBenchmarks', async () => {
 		try {
 			await benchmark_run(benchmark_status, benchmark_output, change_tracker, notes_manager, review_service);
