@@ -23,7 +23,7 @@ interface OpenAiResponse {
 
 export const apiKeySecretKey = 'llmBuddy.openAI.apiKey';
 
-export function getProviderConfiguration(): ProviderConfiguration {
+function getProviderConfiguration(): ProviderConfiguration {
 	const config = vscode.workspace.getConfiguration('llmBuddy');
 	return {
 		provider: config.get<string>('provider', 'openai-compatible'),

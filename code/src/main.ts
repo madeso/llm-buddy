@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { BenchmarkService } from './benchmark_service';
+import { benchmark_exportHtmlReport, benchmark_exportReport, benchmark_run, BenchmarkStatus } from './benchmark_service';
 import { ChangeTracker, getScopeKey } from './change_tracker';
 import { NotesManager } from './notes_manager';
 import { apiKeySecretKey, createProvider } from './providers';
@@ -13,12 +13,17 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	const review_service = new ReviewService(change_tracker, notes_manager, () => createProvider(context));
 	const quality_service = new QualityService(context);
-	const benchmark_service = new BenchmarkService(change_tracker, notes_manager, review_service);
+	const benchmark_status: BenchmarkStatus = {
+		lastReport: '',
+		lastResults: [],
+		running: false
+	};
+	const benchmark_output = vscode.window.createOutputChannel('llm-buddy benchmarks');
 
 	const scopeKey_to_automaticTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	const scopeKey_to_lastAutomaticRuns = new Map<string, number>();
 
-	context.subscriptions.push(change_tracker, notes_manager, review_service, benchmark_service);
+	context.subscriptions.push(change_tracker, notes_manager, review_service, benchmark_output);
 	review_service.setCaptureHandler((capture) => quality_service.handleCapture(capture));
 
 	const find_openDocument_from_ScopeKey = (scopeKey: string): vscode.TextDocument | undefined =>
@@ -121,14 +126,14 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportQualityCases', () => quality_service.exportCases()));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.runBenchmarks', async () => {
 		try {
-			await benchmark_service.run();
+			await benchmark_run(benchmark_status, benchmark_output, change_tracker, notes_manager, review_service);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			void vscode.window.showErrorMessage(`llm-buddy benchmark failed: ${message}`);
 		}
 	}));
-	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportBenchmarkReport', () => benchmark_service.exportReport()));
-	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportBenchmarkHtmlReport', () => benchmark_service.exportHtmlReport()));
+	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportBenchmarkReport', () => benchmark_exportReport(benchmark_status)));
+	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.exportBenchmarkHtmlReport', () => benchmark_exportHtmlReport(benchmark_status)));
 
 	context.subscriptions.push({
 		dispose: () => {

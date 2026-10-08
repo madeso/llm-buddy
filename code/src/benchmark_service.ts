@@ -13,123 +13,112 @@ interface BenchmarkResult {
 	found: string[];
 }
 
-export class BenchmarkService {
-	private lastReport = '';
-	private lastResults: BenchmarkResult[] = [];
-	private running = false;
-	private readonly output = vscode.window.createOutputChannel('llm-buddy benchmarks');
-
-	constructor(
-		private readonly tracker: ChangeTracker,
-		private readonly notes: NotesManager,
-		private readonly reviews: ReviewService,
-	) {}
-
-	async run(): Promise<void> {
-		if (this.running) {
-			throw new Error('A benchmark run is already in progress.');
-		}
-		this.running = true;
-		const results: BenchmarkResult[] = [];
-		this.output.clear();
-		this.output.appendLine(`Running ${benchmarkCases.length} llm-buddy benchmarks...`);
-		this.output.show(true);
-		try {
-			for (const benchmarkCase of benchmarkCases) {
-				const startedAt = Date.now();
-				const document = await vscode.workspace.openTextDocument({
-					language: benchmarkCase.language,
-					content: '',
-				});
-				const uri = document.uri;
-				const scopeKey = getScopeKey(uri);
-				this.tracker.seedDocument(document);
-				try {
-					const edit = new vscode.WorkspaceEdit();
-					edit.insert(uri, new vscode.Position(0, 0), benchmarkCase.content);
-					if (!await vscode.workspace.applyEdit(edit)) {
-						throw new Error(`Could not prepare benchmark document: ${benchmarkCase.name}`);
-					}
-					await this.reviews.review(uri, false);
-					const found = this.notes.list(scopeKey).filter((note) => note.status === 'active');
-					const matched = new Set<number>();
-					let truePositives = 0;
-					let falseNegatives = 0;
-					for (const expected of benchmarkCase.expected) {
-						const match = found.findIndex((note, index) =>
-							!matched.has(index)
-							&& note.line === expected.line
-							&& expected.pattern.test(note.message),
-						);
-						if (match >= 0) {
-							matched.add(match);
-							truePositives++;
-						} else {
-							falseNegatives++;
-						}
-					}
-					const falsePositives = found.length - truePositives;
-					results.push({
-						name: benchmarkCase.name,
-						truePositives,
-						falsePositives,
-						falseNegatives,
-						elapsedSeconds: (Date.now() - startedAt) / 1000,
-						found: found.map((note) => `${note.line}: ${note.message}`),
-					});
-					this.output.appendLine(
-						`${benchmarkCase.name}: TP=${truePositives} FP=${falsePositives} FN=${falseNegatives}`,
-					);
-				} finally {
-					this.notes.removeScope(scopeKey);
-					this.tracker.removeScope(scopeKey);
-				}
-			}
-			this.lastResults = results;
-			this.lastReport = formatMarkdownReport(results);
-			this.output.appendLine(this.lastReport);
-			void vscode.window.showInformationMessage('llm-buddy benchmark run complete.');
-		} finally {
-			this.running = false;
-		}
-	}
-
-	async exportReport(): Promise<void> {
-		if (!this.lastReport) {
-			void vscode.window.showInformationMessage('Run llm-buddy benchmarks before exporting a report.');
-			return;
-		}
-		const target = await vscode.window.showSaveDialog({
-			defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0].uri ?? vscode.Uri.file(''), 'llm-buddy-benchmark.md'),
-			filters: { Markdown: ['md'] },
-		});
-		if (!target) {
-			return;
-		}
-		await vscode.workspace.fs.writeFile(target, Buffer.from(this.lastReport, 'utf8'));
-		void vscode.window.showInformationMessage('llm-buddy benchmark report exported.');
-	}
-
-	async exportHtmlReport(): Promise<void> {
-		if (this.lastResults.length === 0) {
-			void vscode.window.showInformationMessage('Run llm-buddy benchmarks before exporting a report.');
-			return;
-		}
-		const target = await vscode.window.showSaveDialog({
-			defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0].uri ?? vscode.Uri.file(''), 'llm-buddy-benchmark.html'),
-			filters: { HTML: ['html'] },
-		});
-		if (!target) {
-			return;
-		}
-		await vscode.workspace.fs.writeFile(target, Buffer.from(formatHtmlReport(this.lastResults), 'utf8'));
-		void vscode.window.showInformationMessage('llm-buddy HTML benchmark report exported.');
-	}
-
-	dispose(): void {
-		this.output.dispose();
-	}
+export interface BenchmarkStatus {
+	lastReport: string;
+	lastResults: BenchmarkResult[];
+	running: boolean;
 }
+
+export const benchmark_run = async (self: BenchmarkStatus, selfOutput: vscode.OutputChannel, selfTracker: ChangeTracker, selfNotes: NotesManager, selfReviews: ReviewService): Promise<void> => {
+	if (self.running) {
+		throw new Error('A benchmark run is already in progress.');
+	}
+	self.running = true;
+	const results: BenchmarkResult[] = [];
+	selfOutput.clear();
+	selfOutput.appendLine(`Running ${benchmarkCases.length} llm-buddy benchmarks...`);
+	selfOutput.show(true);
+	try {
+		for (const benchmarkCase of benchmarkCases) {
+			const startedAt = Date.now();
+			const document = await vscode.workspace.openTextDocument({
+				language: benchmarkCase.language,
+				content: '',
+			});
+			const uri = document.uri;
+			const scopeKey = getScopeKey(uri);
+			selfTracker.seedDocument(document);
+			try {
+				const edit = new vscode.WorkspaceEdit();
+				edit.insert(uri, new vscode.Position(0, 0), benchmarkCase.content);
+				if (!await vscode.workspace.applyEdit(edit)) {
+					throw new Error(`Could not prepare benchmark document: ${benchmarkCase.name}`);
+				}
+				await selfReviews.review(uri, false);
+				const found = selfNotes.list(scopeKey).filter((note) => note.status === 'active');
+				const matched = new Set<number>();
+				let truePositives = 0;
+				let falseNegatives = 0;
+				for (const expected of benchmarkCase.expected) {
+					const match = found.findIndex((note, index) =>
+						!matched.has(index)
+						&& note.line === expected.line
+						&& expected.pattern.test(note.message),
+					);
+					if (match >= 0) {
+						matched.add(match);
+						truePositives++;
+					} else {
+						falseNegatives++;
+					}
+				}
+				const falsePositives = found.length - truePositives;
+				results.push({
+					name: benchmarkCase.name,
+					truePositives,
+					falsePositives,
+					falseNegatives,
+					elapsedSeconds: (Date.now() - startedAt) / 1000,
+					found: found.map((note) => `${note.line}: ${note.message}`),
+				});
+				selfOutput.appendLine(
+					`${benchmarkCase.name}: TP=${truePositives} FP=${falsePositives} FN=${falseNegatives}`,
+				);
+			} finally {
+				selfNotes.removeScope(scopeKey);
+				selfTracker.removeScope(scopeKey);
+			}
+		}
+		self.lastResults = results;
+		self.lastReport = formatMarkdownReport(results);
+		selfOutput.appendLine(self.lastReport);
+		void vscode.window.showInformationMessage('llm-buddy benchmark run complete.');
+	} finally {
+		self.running = false;
+	}
+};
+
+export const benchmark_exportReport = async (self: BenchmarkStatus): Promise<void> => {
+	if (!self.lastReport) {
+		void vscode.window.showInformationMessage('Run llm-buddy benchmarks before exporting a report.');
+		return;
+	}
+	const target = await vscode.window.showSaveDialog({
+		defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0].uri ?? vscode.Uri.file(''), 'llm-buddy-benchmark.md'),
+		filters: { Markdown: ['md'] },
+	});
+	if (!target) {
+		return;
+	}
+	await vscode.workspace.fs.writeFile(target, Buffer.from(self.lastReport, 'utf8'));
+	void vscode.window.showInformationMessage('llm-buddy benchmark report exported.');
+};
+
+export const benchmark_exportHtmlReport = async (self: BenchmarkStatus): Promise<void> => {
+	if (self.lastResults.length === 0) {
+		void vscode.window.showInformationMessage('Run llm-buddy benchmarks before exporting a report.');
+		return;
+	}
+	const target = await vscode.window.showSaveDialog({
+		defaultUri: vscode.Uri.joinPath(vscode.workspace.workspaceFolders?.[0].uri ?? vscode.Uri.file(''), 'llm-buddy-benchmark.html'),
+		filters: { HTML: ['html'] },
+	});
+	if (!target) {
+		return;
+	}
+	await vscode.workspace.fs.writeFile(target, Buffer.from(formatHtmlReport(self.lastResults), 'utf8'));
+	void vscode.window.showInformationMessage('llm-buddy HTML benchmark report exported.');
+};
 
 function formatMarkdownReport(results: BenchmarkResult[]): string {
 	const truePositives = results.reduce((total, result) => total + result.truePositives, 0);
