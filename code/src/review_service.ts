@@ -94,11 +94,12 @@ type ShowMessage = "show_messages" | "hide_messages";
 
 export type ReviewFunction = (uri: vscode.Uri, showMessages : ShowMessage) => Promise<ReviewCapture | undefined>;
 
+type CaptureHandler = (capture: ReviewCapture) => void;
+
 export class ReviewService {
 	private readonly activeScopes = new Set<string>();
 	private readonly fixTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private readonly captures = new Map<string, ReviewCapture>();
-	private captureHandler: ((capture: ReviewCapture) => void) | undefined;
 
 	constructor(
 		private readonly tracker: ChangeTracker,
@@ -108,11 +109,7 @@ export class ReviewService {
 		this.notes.setToolEventHandler((event) => this.captureTool(event));
 	}
 
-	setCaptureHandler(handler: (capture: ReviewCapture) => void): void {
-		this.captureHandler = handler;
-	}
-
-	async review(uri: vscode.Uri, showMessages: ShowMessage): Promise<ReviewCapture | undefined> {
+	async review(uri: vscode.Uri, showMessages: ShowMessage, captureHandler: CaptureHandler | undefined): Promise<ReviewCapture | undefined> {
 		console.log("starting review");
 		const scopeKey = getScopeKey(uri);
 		if (this.activeScopes.has(scopeKey)) {
@@ -165,7 +162,7 @@ export class ReviewService {
 			vscode.window.showErrorMessage(`llm-buddy review failed: ${message}`);
 		} finally {
 			this.activeScopes.delete(scopeKey);
-			this.finishCapture(capture);
+			this.finishCapture(capture, captureHandler);
 		}
 		return capture;
 	}
@@ -452,7 +449,7 @@ export class ReviewService {
 		}
 	}
 
-	private finishCapture(capture: ReviewCapture): void {
+	private finishCapture(capture: ReviewCapture, captureHandler : CaptureHandler | undefined): void {
 		capture.finishedAt = Date.now();
 		capture.notes = this.notes.list(capture.scopeKey)
 			.filter((note) => note.status === 'active')
@@ -463,7 +460,7 @@ export class ReviewService {
 				message: note.message,
 				severity: note.severity,
 			}));
-		this.captureHandler?.(capture);
+		captureHandler?.(capture);
 		this.captures.delete(capture.scopeKey);
 	}
 

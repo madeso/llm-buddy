@@ -23,8 +23,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	const scopeKey_to_lastAutomaticRuns = new Map<string, number>();
 
 	context.subscriptions.push(change_tracker, notes_manager, review_service, benchmark_output);
-	review_service.setCaptureHandler((capture) => quality_handleCapture(context, capture));
-	const review_function : ReviewFunction = async (uri, show) => await review_service.review(uri, show);
+	const review_function : ReviewFunction = async (uri, show) => await review_service.review(uri, show, (capture) => quality_handleCapture(context, capture));
 
 	const find_openDocument_from_ScopeKey = (scopeKey: string): vscode.TextDocument | undefined =>
 		vscode.workspace.textDocuments.find((document) => getScopeKey(document.uri) === scopeKey);

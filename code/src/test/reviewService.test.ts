@@ -51,7 +51,7 @@ suite('Review service', () => {
 		edit.replace(document.uri, new vscode.Range(0, 0, 0, 3), 'new');
 		try {
 			assert.strictEqual(await vscode.workspace.applyEdit(edit), true);
-			const capture = await review_service.review(document.uri, "hide_messages");
+			const capture = await review_service.review(document.uri, "hide_messages", undefined);
 			assert.ok(capture);
 			assert.strictEqual(capture.responses.length, 2);
 			assert.strictEqual(capture.toolEvents[0].tool, 'add_note');
