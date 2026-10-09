@@ -18,7 +18,7 @@ suite('Review service', () => {
 				values.set(key, value);
 			},
 		};
-		const notes = new NotesManager({ workspaceState });
+		const notes_manager = new NotesManager({ workspaceState });
 		let responseIndex = 0;
 		const provider: LlmProvider = {
 			async complete(_messages: ChatMessage[], _tools: ToolDefinition[]) {
@@ -50,7 +50,7 @@ suite('Review service', () => {
 		const activeScopes = new Set<string>();
 		const fixTimers = new Map<string, TimeoutHandle>();
 		const captures = new Map<string, ReviewCapture>();
-		notes.setToolEventHandler((event) => {
+		notes_manager.setToolEventHandler((event) => {
 			add_tool_event(captures, event);
 		});
 
@@ -58,15 +58,15 @@ suite('Review service', () => {
 		edit.replace(document.uri, new vscode.Range(0, 0, 0, 3), 'new');
 		try {
 			assert.strictEqual(await vscode.workspace.applyEdit(edit), true);
-			const capture = await run_review(activeScopes, captures, tracker, notes, fixTimers, document.uri, "hide_messages", async () => provider, undefined);
+			const capture = await run_review(activeScopes, captures, tracker, notes_manager, fixTimers, document.uri, "hide_messages", async () => provider, undefined);
 			assert.ok(capture);
 			assert.strictEqual(capture.responses.length, 2);
 			assert.strictEqual(capture.toolEvents[0].tool, 'add_note');
-			assert.strictEqual(notes.list(getScopeKey(document.uri))[0].message, 'The value is incorrect.');
+			assert.strictEqual(notes_manager.list(getScopeKey(document.uri))[0].message, 'The value is incorrect.');
 			assert.strictEqual(tracker.getChanges(getScopeKey(document.uri)).length, 0);
 		} finally {
 			destory_timers(fixTimers);
-			notes.dispose();
+			notes_manager.dispose();
 			tracker.dispose();
 		}
 	});

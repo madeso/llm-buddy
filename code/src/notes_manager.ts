@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { NoteStatus, NoteToolEvent, ReviewNote, Severity } from './types';
+import { NoteToolEvent, ReviewNote, Severity } from './types';
 
 const notesStorageKey = 'llmBuddy.notes';
 
@@ -39,7 +39,7 @@ export class NotesManager implements vscode.Disposable {
 		return this.notes.filter((note) => note.scopeKey === scopeKey);
 	}
 
-	activeNotes(): ReviewNote[] {
+	private activeNotes(): ReviewNote[] {
 		return this.notes.filter((note) => note.status === 'active');
 	}
 

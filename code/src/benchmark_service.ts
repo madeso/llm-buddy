@@ -18,7 +18,7 @@ export interface BenchmarkStatus {
 	running: boolean;
 }
 
-export const benchmark_run = async (self: BenchmarkStatus, selfOutput: vscode.OutputChannel, selfTracker: ChangeTracker, selfNotes: NotesManager, review_service: ReviewFunction): Promise<void> => {
+export const benchmark_run = async (self: BenchmarkStatus, selfOutput: vscode.OutputChannel, selfTracker: ChangeTracker, notes_manager: NotesManager, review_service: ReviewFunction): Promise<void> => {
 	if (self.running) {
 		throw new Error('A benchmark run is already in progress.');
 	}
@@ -44,7 +44,7 @@ export const benchmark_run = async (self: BenchmarkStatus, selfOutput: vscode.Ou
 					throw new Error(`Could not prepare benchmark document: ${benchmarkCase.name}`);
 				}
 				await review_service(uri, "hide_messages");
-				const found = selfNotes.list(scopeKey).filter((note) => note.status === 'active');
+				const found = notes_manager.list(scopeKey).filter((note) => note.status === 'active');
 				const matched = new Set<number>();
 				let truePositives = 0;
 				let falseNegatives = 0;
@@ -74,7 +74,7 @@ export const benchmark_run = async (self: BenchmarkStatus, selfOutput: vscode.Ou
 					`${benchmarkCase.name}: TP=${truePositives} FP=${falsePositives} FN=${falseNegatives}`,
 				);
 			} finally {
-				selfNotes.removeScope(scopeKey);
+				notes_manager.removeScope(scopeKey);
 				selfTracker.removeScope(scopeKey);
 			}
 		}

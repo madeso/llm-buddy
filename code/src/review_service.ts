@@ -166,7 +166,7 @@ export const run_review = async (
 	this_activeScopes: Set<string>,
 	this_captures: Map<string, ReviewCapture>,
 	this_tracker: ChangeTracker,
-	this_notes: NotesManager,
+	notes_manager: NotesManager,
 	this_fixTimers: Map<string, TimeoutHandle>,
 	uri: vscode.Uri,
 	message_action: ShowMessage,
@@ -216,7 +216,7 @@ export const run_review = async (
 	try {
 		const provider = await this_providerFactory();
 		capture.provider = get_setting_or('provider', 'openai-compatible');
-		await runConversation(this_notes, this_tracker, provider, scopeKey, changes, diff, reviewedRevision, capture,
+		await runConversation(notes_manager, this_tracker, provider, scopeKey, changes, diff, reviewedRevision, capture,
 			args => scheduleFix(this_fixTimers, this_providerFactory, this_tracker, args.chunk_uri, args.line_number, args.note)
 		);
 	} catch (error) {
@@ -228,7 +228,7 @@ export const run_review = async (
 	} finally {
 		this_activeScopes.delete(scopeKey);
 		capture.finishedAt = Date.now();
-		capture.notes = this_notes.list(capture.scopeKey)
+		capture.notes = notes_manager.list(capture.scopeKey)
 			.filter((note) => note.status === 'active')
 			.map((note) => ({
 				id: note.id,
@@ -244,7 +244,7 @@ export const run_review = async (
 };
 
 const runConversation = async (
-	this_notes: NotesManager,
+	notes_manager: NotesManager,
 	this_tracker: ChangeTracker,
 	provider: LlmProvider,
 	scopeKey: string,
@@ -258,7 +258,7 @@ const runConversation = async (
 		{ role: 'system', content: instructions(scopeKey) },
 		{
 			role: 'user',
-			content: `${diff}${formatPreviousNotes(this_notes.list(scopeKey))}`,
+			content: `${diff}${formatPreviousNotes(notes_manager.list(scopeKey))}`,
 		},
 	];
 	const maximumIterations = get_setting_or('maxIterations', 8);
@@ -279,7 +279,7 @@ const runConversation = async (
 
 		let ended = false;
 		for (const call of calls) {
-			const result = await executeTool(this_notes, call, scopeKey, changes, this_tracker.getOpenDocument,
+			const result = await executeTool(notes_manager, call, scopeKey, changes, this_tracker.getOpenDocument,
 				fix_callback
 			);
 			messages.push({ role: 'tool', tool_call_id: call.id, content: result });
@@ -299,7 +299,7 @@ const runConversation = async (
 type AiArg = Record<string, unknown>;
 
 const executeTool = async (
-	this_notes: NotesManager,
+	notes_manager: NotesManager,
 	call: ToolCall,
 	scopeKey: string,
 	changes: ChangeChunk[],
@@ -321,11 +321,11 @@ const executeTool = async (
 		case 'read_file':
 			return tool_readFile(get_open_document, args, scopeKey, changes);
 		case 'add_note':
-			return tool_addNote(this_notes, args, scopeKey, changes, schedule_fix_callback);
+			return tool_addNote(notes_manager, args, scopeKey, changes, schedule_fix_callback);
 		case 'update_note':
-			return tool_updateNote(this_notes, args, scopeKey);
+			return tool_updateNote(notes_manager, args, scopeKey);
 		case 'remove_note':
-			return tool_removeNote(this_notes, args, scopeKey);
+			return tool_removeNote(notes_manager, args, scopeKey);
 		case 'end':
 			return 'Review complete.';
 		default:
@@ -363,24 +363,24 @@ const tool_readFile = (
 		.join('\n');
 };
 
-const tool_removeNote = (this_notes: NotesManager, args: AiArg, scopeKey: string): string => {
+const tool_removeNote = (notes_manager: NotesManager, args: AiArg, scopeKey: string): string => {
 	if (typeof args.note_id !== 'number' || !Number.isInteger(args.note_id)) {
 		return 'note_id must be an integer.';
 	}
-	return this_notes.dismiss(scopeKey, args.note_id, 'removed by agent');
+	return notes_manager.dismiss(scopeKey, args.note_id, 'removed by agent');
 };
 
-const tool_updateNote = (this_notes: NotesManager, args: AiArg, scopeKey: string): string => {
+const tool_updateNote = (notes_manager: NotesManager, args: AiArg, scopeKey: string): string => {
 	if (typeof args.note_id !== 'number' || !Number.isInteger(args.note_id) || typeof args.note !== 'string') {
 		return 'note_id must be an integer and note must be a string.';
 	}
-	return this_notes.update(scopeKey, args.note_id, args.note);
+	return notes_manager.update(scopeKey, args.note_id, args.note);
 };
 
 type ScheduleFixFunction = (args: {chunk_uri: string, line_number: number, note: string}) => string;
 
 const tool_addNote = (
-	this_notes: NotesManager,
+	notes_manager: NotesManager,
 	args: AiArg,
 	scopeKey: string,
 	changes: ChangeChunk[],
@@ -409,7 +409,7 @@ const tool_addNote = (
 		}
 		return 'Ignoring note below the configured minimum severity.';
 	}
-	return this_notes.add(scopeKey, vscode.Uri.parse(chunk.uri), args.line_number, args.note, args.severity);
+	return notes_manager.add(scopeKey, vscode.Uri.parse(chunk.uri), args.line_number, args.note, args.severity);
 };
 
 const findChunk = (
