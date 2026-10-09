@@ -12,8 +12,17 @@ import {
 	ToolDefinition,
 	ReviewCapture,
 	NoteToolEvent,
+	ReviewNote,
 } from './types';
 
+
+const instructions = (scopeKey: string): string => 
+	`You review only the user's recent changes in VS Code scope ${scopeKey}. ` 
+	+ 'Report concrete problems in changed code or prose, not hypothetical concerns. '
+	+'Do not comment on incomplete work near the cursor. Removed lines are labeled "old" and are not current locations. '
+	+'Use read_file when context is needed. Add only brief, actionable notes on current line numbers. '
+	+'Use update_note or remove_note for previous notes when appropriate. Call end when finished.'
+	;
 
 const reviewTools: ToolDefinition[] = [
 	{
@@ -96,362 +105,130 @@ export type ReviewFunction = (uri: vscode.Uri, showMessages : ShowMessage) => Pr
 
 type CaptureHandler = (capture: ReviewCapture) => void;
 
-export class ReviewService {
-	private readonly activeScopes = new Set<string>();
-	private readonly fixTimers = new Map<string, ReturnType<typeof setTimeout>>();
-	private readonly captures = new Map<string, ReviewCapture>();
-
-	constructor(
-		private readonly tracker: ChangeTracker,
-		private readonly notes: NotesManager,
-		private readonly providerFactory: () => Promise<LlmProvider>,
-	) {
-		this.notes.setToolEventHandler((event) => this.captureTool(event));
+const formatPreviousNotes = (notes: ReviewNote[]): string => {
+	if (notes.length === 0) {
+		return '';
 	}
+	return '\n\nPrevious notes in this scope, newest first. Active notes are visible; dismissed notes remain in history to avoid repeating stale feedback.\n'
+		+ notes.slice().reverse().map((note) =>
+			`- note_id ${note.id} [${note.status}] ${vscode.Uri.parse(note.uri).fsPath}:${note.line} (${note.severity}): ${note.message}`
+			+ (note.status === 'dismissed' ? ` (dismissed: ${note.dismissedReason ?? 'unknown'})` : '')
+			+ (note.editedAt ? ' (annotated line changed; re-evaluate this note)' : ''),
+		).join('\n');
+};
 
-	async review(uri: vscode.Uri, showMessages: ShowMessage, captureHandler: CaptureHandler | undefined): Promise<ReviewCapture | undefined> {
-		console.log("starting review");
-		const scopeKey = getScopeKey(uri);
-		if (this.activeScopes.has(scopeKey)) {
-			console.log("missing scope key");
-			return undefined;
-		}
-		const startedAt = Date.now();
-		const changes = this.tracker.getChanges(scopeKey);
-		const reviewedRevision = this.tracker.getLatestRevision(scopeKey);
-		if (changes.length === 0) {
-			if (showMessages === 'show_messages') {
-				vscode.window.showInformationMessage('llm-buddy: no new edits to review in this scope.');
-			}
-			return undefined;
-		}
-		const diff = this.formatChanges(changes);
-		if (!diff.trim()) {
-			this.tracker.markReviewed(scopeKey, reviewedRevision);
-			if (showMessages === 'show_messages') {
-				vscode.window.showInformationMessage('llm-buddy: no net changes to review.');
-			}
-			return undefined;
-		}
-
-		this.activeScopes.add(scopeKey);
-		const capture: ReviewCapture = {
-			scopeKey,
-			provider: '',
-			startedAt,
-			diff,
-			toolEvents: [],
-			responses: [],
-			notes: [],
-			files: [...new Map(changes.map((change) => [change.uri, {
-				uri: change.uri,
-				file: change.fileName,
-				language: change.languageId,
-			}])).values()],
-		};
-		this.captures.set(scopeKey, capture);
-		try {
-			const provider = await this.providerFactory();
-			capture.provider = get_setting_or('provider', 'openai-compatible');
-			await this.runConversation(provider, scopeKey, changes, diff, reviewedRevision, capture);
-		} catch (error) {
-			if (showMessages === 'hide_messages') {
-				throw error;
-			}
-			const message = error instanceof Error ? error.message : String(error);
-			vscode.window.showErrorMessage(`llm-buddy review failed: ${message}`);
-		} finally {
-			this.activeScopes.delete(scopeKey);
-			this.finishCapture(capture, captureHandler);
-		}
-		return capture;
+const formatChanges = (tracker: ChangeTracker, changes: ChangeChunk[]): string => {
+	const documents = new Map<string, ChangeChunk[]>();
+	for (const change of changes) {
+		const entries = documents.get(change.uri) ?? [];
+		entries.push(change);
+		documents.set(change.uri, entries);
 	}
-
-	private async runConversation(
-		provider: LlmProvider,
-		scopeKey: string,
-		changes: ChangeChunk[],
-		diff: string,
-		reviewedRevision: number,
-		capture: ReviewCapture,
-	): Promise<void> {
-		const messages: ChatMessage[] = [
-			{ role: 'system', content: this.instructions(scopeKey) },
-			{
-				role: 'user',
-				content: `${diff}${this.formatPreviousNotes(scopeKey)}`,
-			},
-		];
-		const maximumIterations = get_setting_or('maxIterations', 8);
-		for (let iteration = 0; iteration < maximumIterations; iteration++) {
-			const response = await provider.complete(messages, reviewTools);
-			capture.responses.push(response.message);
-			messages.push(response.message);
-			const calls = response.message.tool_calls ?? [];
-			if (calls.length === 0) {
-				if (response.message.content) {
-					messages.push({
-						role: 'user',
-						content: 'Continue the review. Use the available tools to add, update, or remove notes, then call end.',
-					});
-				}
-				continue;
-			}
-
-			let ended = false;
-			for (const call of calls) {
-				const result = await this.executeTool(call, scopeKey, changes);
-				messages.push({ role: 'tool', tool_call_id: call.id, content: result });
-				if (call.function.name === 'end') {
-					ended = true;
-				}
-			}
-			if (ended) {
-				this.tracker.markReviewed(scopeKey, reviewedRevision);
-				return;
-			}
-		}
-		throw new Error(`Review did not finish within ${maximumIterations} tool iterations.`);
-	}
-
-	private async executeTool(
-		call: ToolCall,
-		scopeKey: string,
-		changes: ChangeChunk[],
-	): Promise<string> {
-		let args: Record<string, unknown>;
-		try {
-			const parsed: unknown = JSON.parse(call.function.arguments || '{}');
-			if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-				return 'Tool arguments must be a JSON object.';
-			}
-			args = parsed as Record<string, unknown>;
-		} catch {
-			return 'Tool arguments were not valid JSON.';
-		}
-
-		switch (call.function.name) {
-			case 'read_file':
-				return this.readFile(args, scopeKey, changes);
-			case 'add_note':
-				return this.addNote(args, scopeKey, changes);
-			case 'update_note':
-				return this.updateNote(args, scopeKey);
-			case 'remove_note':
-				return this.removeNote(args, scopeKey);
-			case 'end':
-				return 'Review complete.';
-			default:
-				return `Unknown tool: ${call.function.name}`;
-		}
-	}
-
-	private readFile(
-		args: Record<string, unknown>,
-		scopeKey: string,
-		changes: ChangeChunk[],
-	): string {
-		const chunk = this.findChunk(args.file, scopeKey, changes);
-		if (!chunk) {
-			return 'File is not part of this review scope.';
-		}
-		const document = this.tracker.getOpenDocument(chunk.uri);
+	const sections: string[] = [];
+	for (const [uri, entries] of documents) {
+		const first = entries[0];
+		const document = tracker.getOpenDocument(uri);
 		if (!document) {
-			return 'File is no longer open; it cannot be read in this review.';
+			continue;
 		}
-		const begin = validLine(args.begin, 1);
-		const end = validLine(args.end, document.lineCount);
-		if (begin < 1 || end < begin) {
-			return 'Requested line range is invalid.';
+		const currentText = document.getText();
+		const originalText = reconstructOriginal(currentText, entries);
+		const diff = createNumberedDiff(originalText, currentText).text;
+		if (!diff) {
+			continue;
 		}
-		const first = Math.min(begin - 1, document.lineCount - 1);
-		const last = Math.min(end, document.lineCount);
-		return document.getText(new vscode.Range(first, 0, last, 0))
-			.split(/\r?\n/)
-			.map((line, index) => `${first + index + 1}: ${line}`)
-			.join('\n');
-	}
-
-	private addNote(
-		args: Record<string, unknown>,
-		scopeKey: string,
-		changes: ChangeChunk[],
-	): string {
-		if (typeof args.note !== 'string' || !args.note.trim()) {
-			return 'A non-empty note is required.';
-		}
-		if (typeof args.line_number !== 'number' || !Number.isInteger(args.line_number)) {
-			return 'line_number must be an integer.';
-		}
-		if (!is_severity(args.severity)) {
-			return 'severity must be trivial, significant, or critical.';
-		}
-		const chunk = this.findChunk(args.file, scopeKey, changes);
-		if (!chunk) {
-			return 'File is not part of this review scope.';
-		}
-		const minimum = get_setting_or<Severity>('detectMinimum', 'significant');
-		if (!is_severity(minimum)) {
-			return 'llmBuddy.detectMinimum must be trivial, significant, or critical.';
-		}
-		if (rank_from_severity(args.severity) < rank_from_severity(minimum)) {
-			if (get_setting_or('fixUnreported', false)) {
-				return this.scheduleFix(chunk.uri, args.line_number, args.note);
-			}
-			return 'Ignoring note below the configured minimum severity.';
-		}
-		return this.notes.add(scopeKey, vscode.Uri.parse(chunk.uri), args.line_number, args.note, args.severity);
-	}
-
-	private updateNote(args: Record<string, unknown>, scopeKey: string): string {
-		if (typeof args.note_id !== 'number' || !Number.isInteger(args.note_id) || typeof args.note !== 'string') {
-			return 'note_id must be an integer and note must be a string.';
-		}
-		return this.notes.update(scopeKey, args.note_id, args.note);
-	}
-
-	private removeNote(args: Record<string, unknown>, scopeKey: string): string {
-		if (typeof args.note_id !== 'number' || !Number.isInteger(args.note_id)) {
-			return 'note_id must be an integer.';
-		}
-		return this.notes.dismiss(scopeKey, args.note_id, 'removed by agent');
-	}
-
-	private findChunk(
-		file: unknown,
-		scopeKey: string,
-		changes: ChangeChunk[],
-	): ChangeChunk | undefined {
-		if (typeof file !== 'string') {
-			return undefined;
-		}
-		return changes.find((chunk) =>
-			chunk.scopeKey === scopeKey && (chunk.fileName === file || vscode.Uri.parse(chunk.uri).fsPath === file),
+		const editor = vscode.window.activeTextEditor;
+		const cursorLine = editor?.document.uri.toString() === uri ? editor.selection.active.line + 1 : 'unknown';
+		sections.push(
+			`=== File: ${first.fileName}  Language: ${document.languageId}  Project: ${getScopeDescription(document.uri)}  Cursor: line ${cursorLine} ===\n${diff}`,
 		);
 	}
+	return sections.join('\n\n');
+};
 
-	private formatChanges(changes: ChangeChunk[]): string {
-		const documents = new Map<string, ChangeChunk[]>();
-		for (const change of changes) {
-			const entries = documents.get(change.uri) ?? [];
-			entries.push(change);
-			documents.set(change.uri, entries);
+export type TimeoutHandle = ReturnType<typeof setTimeout>;
+
+type ProviderFactoryFunction = () => Promise<LlmProvider>;
+
+export const add_tool_event = (captures: Map<string, ReviewCapture>, event: NoteToolEvent) => {
+	const capture = captures.get(event.scopeKey);
+	if (capture) {
+		capture.toolEvents.push(event);
+	}
+};
+
+export interface ReviewState {
+	activeScopes: Set<string>;
+	captures: Map<string, ReviewCapture>;
+}
+
+export const run_review = async (
+	this_activeScopes: Set<string>,
+	this_captures: Map<string, ReviewCapture>,
+	this_tracker: ChangeTracker,
+	this_notes: NotesManager,
+	this_fixTimers: Map<string, TimeoutHandle>,
+	uri: vscode.Uri,
+	message_action: ShowMessage,
+	this_providerFactory: ProviderFactoryFunction,
+	captureHandler: CaptureHandler | undefined
+): Promise<ReviewCapture | undefined>  => {
+	console.log("starting review");
+	const scopeKey = getScopeKey(uri);
+	if (this_activeScopes.has(scopeKey)) {
+		console.log("missing scope key");
+		return undefined;
+	}
+	const startedAt = Date.now();
+	const changes = this_tracker.getChanges(scopeKey);
+	const reviewedRevision = this_tracker.getLatestRevision(scopeKey);
+	if (changes.length === 0) {
+		if (message_action === 'show_messages') {
+			vscode.window.showInformationMessage('llm-buddy: no new edits to review in this scope.');
 		}
-		const sections: string[] = [];
-		for (const [uri, entries] of documents) {
-			const first = entries[0];
-			const document = this.tracker.getOpenDocument(uri);
-			if (!document) {
-				continue;
-			}
-			const currentText = document.getText();
-			const originalText = reconstructOriginal(currentText, entries);
-			const diff = createNumberedDiff(originalText, currentText).text;
-			if (!diff) {
-				continue;
-			}
-			const editor = vscode.window.activeTextEditor;
-			const cursorLine = editor?.document.uri.toString() === uri ? editor.selection.active.line + 1 : 'unknown';
-			sections.push(
-				`=== File: ${first.fileName}  Language: ${document.languageId}  Project: ${getScopeDescription(document.uri)}  Cursor: line ${cursorLine} ===\n${diff}`,
-			);
+		return undefined;
+	}
+	const diff = formatChanges(this_tracker, changes);
+	if (!diff.trim()) {
+		this_tracker.markReviewed(scopeKey, reviewedRevision);
+		if (message_action === 'show_messages') {
+			vscode.window.showInformationMessage('llm-buddy: no net changes to review.');
 		}
-		return sections.join('\n\n');
+		return undefined;
 	}
 
-	private formatPreviousNotes(scopeKey: string): string {
-		const notes = this.notes.list(scopeKey);
-		if (notes.length === 0) {
-			return '';
+	this_activeScopes.add(scopeKey);
+	const capture: ReviewCapture = {
+		scopeKey,
+		provider: '',
+		startedAt,
+		diff,
+		toolEvents: [],
+		responses: [],
+		notes: [],
+		files: [...new Map(changes.map((change) => [change.uri, {
+			uri: change.uri,
+			file: change.fileName,
+			language: change.languageId,
+		}])).values()],
+	};
+	this_captures.set(scopeKey, capture);
+	try {
+		const provider = await this_providerFactory();
+		capture.provider = get_setting_or('provider', 'openai-compatible');
+		await runConversation(this_notes, this_tracker, provider, scopeKey, changes, diff, reviewedRevision, capture,
+			args => scheduleFix(this_fixTimers, this_providerFactory, this_tracker, args.chunk_uri, args.line_number, args.note)
+		);
+	} catch (error) {
+		if (message_action === 'hide_messages') {
+			throw error;
 		}
-		return '\n\nPrevious notes in this scope, newest first. Active notes are visible; dismissed notes remain in history to avoid repeating stale feedback.\n'
-			+ notes.slice().reverse().map((note) =>
-				`- note_id ${note.id} [${note.status}] ${vscode.Uri.parse(note.uri).fsPath}:${note.line} (${note.severity}): ${note.message}`
-				+ (note.status === 'dismissed' ? ` (dismissed: ${note.dismissedReason ?? 'unknown'})` : '')
-				+ (note.editedAt ? ' (annotated line changed; re-evaluate this note)' : ''),
-			).join('\n');
-	}
-
-	private instructions(scopeKey: string): string {
-		return `You review only the user's recent changes in VS Code scope ${scopeKey}. Report concrete problems in changed code or prose, not hypothetical concerns. Do not comment on incomplete work near the cursor. Removed lines are labeled "old" and are not current locations. Use read_file when context is needed. Add only brief, actionable notes on current line numbers. Use update_note or remove_note for previous notes when appropriate. Call end when finished.`;
-	}
-
-	private scheduleFix(uri: string, line: number, problem: string): string {
-		const key = `${uri}:${line}`;
-		const oldTimer = this.fixTimers.get(key);
-		if (oldTimer) {
-			clearTimeout(oldTimer);
-		}
-		const fix_idle_delay = Math.max(0, get_setting_or('fixIdleDelay', 3));
-		const timer = setTimeout(() => {
-			this.fixTimers.delete(key);
-			this.runFix(uri, line, problem).catch((error: unknown) => {
-				const message = error instanceof Error ? error.message : String(error);
-				vscode.window.showErrorMessage(`llm-buddy automatic fix failed: ${message}`);
-			});
-		}, fix_idle_delay * 1000);
-		this.fixTimers.set(key, timer);
-		return `Automatic fix scheduled after ${fix_idle_delay} seconds of idle time.`;
-	}
-
-	private async runFix(uri: string, lineNumber: number, problem: string): Promise<void> {
-		const document = this.tracker.getOpenDocument(uri);
-		if (!document || lineNumber < 1 || lineNumber > document.lineCount) {
-			return;
-		}
-		const version = document.version;
-		const first = Math.max(0, lineNumber - 2);
-		const last = Math.min(document.lineCount, lineNumber + 1);
-		const range = new vscode.Range(first, 0, last, 0);
-		const original = document.getText(range);
-		const provider = await this.providerFactory();
-		const tools: ToolDefinition[] = [{
-			type: 'function',
-			function: {
-				name: 'replace_content',
-				description: 'Replace the supplied content with a corrected version.',
-				parameters: {
-					type: 'object',
-					properties: { new_content: { type: 'string' } },
-					required: ['new_content'],
-					additionalProperties: false,
-				},
-			},
-		}];
-		const response = await provider.complete([{
-			role: 'user',
-			content: `A detected issue needs a small fix. Problem: ${problem}\nLanguage: ${document.languageId}\nContent to fix:\n${original}`,
-		}], tools);
-		const call = response.message.tool_calls?.find((tool) => tool.function.name === 'replace_content');
-		if (!call) {
-			return;
-		}
-		const args: unknown = JSON.parse(call.function.arguments);
-		if (!args || typeof args !== 'object' || !('new_content' in args) || typeof args.new_content !== 'string') {
-			throw new Error('Provider returned an invalid replacement.');
-		}
-		const currentDocument = this.tracker.getOpenDocument(uri);
-		if (!currentDocument || currentDocument.version !== version || currentDocument.getText(range) !== original) {
-			vscode.window.showInformationMessage('llm-buddy skipped an automatic fix because the document changed.');
-			return;
-		}
-		const edit = new vscode.WorkspaceEdit();
-		edit.replace(currentDocument.uri, range, args.new_content);
-		if (!await vscode.workspace.applyEdit(edit)) {
-			throw new Error('VS Code declined the automatic edit.');
-		}
-	}
-
-	private captureTool(event: NoteToolEvent): void {
-		const capture = this.captures.get(event.scopeKey);
-		if (capture) {
-			capture.toolEvents.push(event);
-		}
-	}
-
-	private finishCapture(capture: ReviewCapture, captureHandler : CaptureHandler | undefined): void {
+		const message = error instanceof Error ? error.message : String(error);
+		vscode.window.showErrorMessage(`llm-buddy review failed: ${message}`);
+	} finally {
+		this_activeScopes.delete(scopeKey);
 		capture.finishedAt = Date.now();
-		capture.notes = this.notes.list(capture.scopeKey)
+		capture.notes = this_notes.list(capture.scopeKey)
 			.filter((note) => note.status === 'active')
 			.map((note) => ({
 				id: note.id,
@@ -461,17 +238,265 @@ export class ReviewService {
 				severity: note.severity,
 			}));
 		captureHandler?.(capture);
-		this.captures.delete(capture.scopeKey);
+		this_captures.delete(capture.scopeKey);
 	}
+	return capture;
+};
 
-	dispose(): void {
-		for (const timer of this.fixTimers.values()) {
-			clearTimeout(timer);
+const runConversation = async (
+	this_notes: NotesManager,
+	this_tracker: ChangeTracker,
+	provider: LlmProvider,
+	scopeKey: string,
+	changes: ChangeChunk[],
+	diff: string,
+	reviewedRevision: number,
+	capture: ReviewCapture,
+	fix_callback: ScheduleFixFunction,
+): Promise<void> => {
+	const messages: ChatMessage[] = [
+		{ role: 'system', content: instructions(scopeKey) },
+		{
+			role: 'user',
+			content: `${diff}${formatPreviousNotes(this_notes.list(scopeKey))}`,
+		},
+	];
+	const maximumIterations = get_setting_or('maxIterations', 8);
+	for (let iteration = 0; iteration < maximumIterations; iteration++) {
+		const response = await provider.complete(messages, reviewTools);
+		capture.responses.push(response.message);
+		messages.push(response.message);
+		const calls = response.message.tool_calls ?? [];
+		if (calls.length === 0) {
+			if (response.message.content) {
+				messages.push({
+					role: 'user',
+					content: 'Continue the review. Use the available tools to add, update, or remove notes, then call end.',
+				});
+			}
+			continue;
 		}
-		this.fixTimers.clear();
-	}
-}
 
-function validLine(value: unknown, fallback: number): number {
-	return typeof value === 'number' && Number.isInteger(value) ? value : fallback;
-}
+		let ended = false;
+		for (const call of calls) {
+			const result = await executeTool(this_notes, call, scopeKey, changes, this_tracker.getOpenDocument,
+				fix_callback
+			);
+			messages.push({ role: 'tool', tool_call_id: call.id, content: result });
+			if (call.function.name === 'end') {
+				ended = true;
+			}
+		}
+		if (ended) {
+			this_tracker.markReviewed(scopeKey, reviewedRevision);
+			return;
+		}
+	}
+	throw new Error(`Review did not finish within ${maximumIterations} tool iterations.`);
+};
+
+
+type AiArg = Record<string, unknown>;
+
+const executeTool = async (
+	this_notes: NotesManager,
+	call: ToolCall,
+	scopeKey: string,
+	changes: ChangeChunk[],
+	get_open_document: GetOpenDocumentFunction,
+	schedule_fix_callback: ScheduleFixFunction
+): Promise<string> => {
+	let args: Record<string, unknown>;
+	try {
+		const parsed: unknown = JSON.parse(call.function.arguments || '{}');
+		if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+			return 'Tool arguments must be a JSON object.';
+		}
+		args = parsed as Record<string, unknown>;
+	} catch {
+		return 'Tool arguments were not valid JSON.';
+	}
+
+	switch (call.function.name) {
+		case 'read_file':
+			return tool_readFile(get_open_document, args, scopeKey, changes);
+		case 'add_note':
+			return tool_addNote(this_notes, args, scopeKey, changes, schedule_fix_callback);
+		case 'update_note':
+			return tool_updateNote(this_notes, args, scopeKey);
+		case 'remove_note':
+			return tool_removeNote(this_notes, args, scopeKey);
+		case 'end':
+			return 'Review complete.';
+		default:
+			return `Unknown tool: ${call.function.name}`;
+	}
+};
+
+// tracker.getOpenDocument
+type GetOpenDocumentFunction = (uri: string) => vscode.TextDocument | undefined;
+
+const tool_readFile = (
+	get_open_document: GetOpenDocumentFunction,
+	args: AiArg,
+	scopeKey: string,
+	changes: ChangeChunk[],
+): string => {
+	const chunk = findChunk(args.file, scopeKey, changes);
+	if (!chunk) {
+		return 'File is not part of this review scope.';
+	}
+	const document = get_open_document(chunk.uri);
+	if (!document) {
+		return 'File is no longer open; it cannot be read in this review.';
+	}
+	const begin = as_integer(args.begin) ?? 1;
+	const end = as_integer(args.end) ??  document.lineCount;
+	if (begin < 1 || end < begin) {
+		return 'Requested line range is invalid.';
+	}
+	const first = Math.min(begin - 1, document.lineCount - 1);
+	const last = Math.min(end, document.lineCount);
+	return document.getText(new vscode.Range(first, 0, last, 0))
+		.split(/\r?\n/)
+		.map((line, index) => `${first + index + 1}: ${line}`)
+		.join('\n');
+};
+
+const tool_removeNote = (this_notes: NotesManager, args: AiArg, scopeKey: string): string => {
+	if (typeof args.note_id !== 'number' || !Number.isInteger(args.note_id)) {
+		return 'note_id must be an integer.';
+	}
+	return this_notes.dismiss(scopeKey, args.note_id, 'removed by agent');
+};
+
+const tool_updateNote = (this_notes: NotesManager, args: AiArg, scopeKey: string): string => {
+	if (typeof args.note_id !== 'number' || !Number.isInteger(args.note_id) || typeof args.note !== 'string') {
+		return 'note_id must be an integer and note must be a string.';
+	}
+	return this_notes.update(scopeKey, args.note_id, args.note);
+};
+
+type ScheduleFixFunction = (args: {chunk_uri: string, line_number: number, note: string}) => string;
+
+const tool_addNote = (
+	this_notes: NotesManager,
+	args: AiArg,
+	scopeKey: string,
+	changes: ChangeChunk[],
+	schedule_fix_callback: ScheduleFixFunction
+): string => {
+	if (typeof args.note !== 'string' || !args.note.trim()) {
+		return 'A non-empty note is required.';
+	}
+	if (typeof args.line_number !== 'number' || !Number.isInteger(args.line_number)) {
+		return 'line_number must be an integer.';
+	}
+	if (!is_severity(args.severity)) {
+		return 'severity must be trivial, significant, or critical.';
+	}
+	const chunk = findChunk(args.file, scopeKey, changes);
+	if (!chunk) {
+		return 'File is not part of this review scope.';
+	}
+	const minimum = get_setting_or<Severity>('detectMinimum', 'significant');
+	if (!is_severity(minimum)) {
+		return 'llmBuddy.detectMinimum must be trivial, significant, or critical.';
+	}
+	if (rank_from_severity(args.severity) < rank_from_severity(minimum)) {
+		if (get_setting_or('fixUnreported', false)) {
+			return schedule_fix_callback({chunk_uri: chunk.uri, line_number: args.line_number, note: args.note});
+		}
+		return 'Ignoring note below the configured minimum severity.';
+	}
+	return this_notes.add(scopeKey, vscode.Uri.parse(chunk.uri), args.line_number, args.note, args.severity);
+};
+
+const findChunk = (
+		file: unknown,
+		scopeKey: string,
+		changes: ChangeChunk[],
+	): ChangeChunk | undefined => {
+	if (typeof file !== 'string') {
+		return undefined;
+	}
+	return changes.find((chunk) =>
+		chunk.scopeKey === scopeKey && (chunk.fileName === file || vscode.Uri.parse(chunk.uri).fsPath === file),
+	);
+};
+
+
+const scheduleFix = (this_fixTimers: Map<string, TimeoutHandle>, this_providerFactory: ProviderFactoryFunction, this_tracker: ChangeTracker, uri: string, line: number, problem: string): string => {
+	const key = `${uri}:${line}`;
+	const oldTimer = this_fixTimers.get(key);
+	if (oldTimer) {
+		clearTimeout(oldTimer);
+	}
+	const fix_idle_delay = Math.max(0, get_setting_or('fixIdleDelay', 3));
+	const timer = setTimeout(() => {
+		this_fixTimers.delete(key);
+		runFix(this_tracker, this_providerFactory, uri, line, problem).catch((error: unknown) => {
+			const message = error instanceof Error ? error.message : String(error);
+			vscode.window.showErrorMessage(`llm-buddy automatic fix failed: ${message}`);
+		});
+	}, fix_idle_delay * 1000);
+	this_fixTimers.set(key, timer);
+	return `Automatic fix scheduled after ${fix_idle_delay} seconds of idle time.`;
+};
+
+const runFix = async (this_tracker: ChangeTracker, this_providerFactory: ProviderFactoryFunction, uri: string, lineNumber: number, problem: string): Promise<void> => {
+	const document = this_tracker.getOpenDocument(uri);
+	if (!document || lineNumber < 1 || lineNumber > document.lineCount) {
+		return;
+	}
+	const version = document.version;
+	const first = Math.max(0, lineNumber - 2);
+	const last = Math.min(document.lineCount, lineNumber + 1);
+	const range = new vscode.Range(first, 0, last, 0);
+	const original = document.getText(range);
+	const provider = await this_providerFactory();
+	const tools: ToolDefinition[] = [{
+		type: 'function',
+		function: {
+			name: 'replace_content',
+			description: 'Replace the supplied content with a corrected version.',
+			parameters: {
+				type: 'object',
+				properties: { new_content: { type: 'string' } },
+				required: ['new_content'],
+				additionalProperties: false,
+			},
+		},
+	}];
+	const response = await provider.complete([{
+		role: 'user',
+		content: `A detected issue needs a small fix. Problem: ${problem}\nLanguage: ${document.languageId}\nContent to fix:\n${original}`,
+	}], tools);
+	const call = response.message.tool_calls?.find((tool) => tool.function.name === 'replace_content');
+	if (!call) {
+		return;
+	}
+	const args: unknown = JSON.parse(call.function.arguments);
+	if (!args || typeof args !== 'object' || !('new_content' in args) || typeof args.new_content !== 'string') {
+		throw new Error('Provider returned an invalid replacement.');
+	}
+	const currentDocument = this_tracker.getOpenDocument(uri);
+	if (!currentDocument || currentDocument.version !== version || currentDocument.getText(range) !== original) {
+		vscode.window.showInformationMessage('llm-buddy skipped an automatic fix because the document changed.');
+		return;
+	}
+	const edit = new vscode.WorkspaceEdit();
+	edit.replace(currentDocument.uri, range, args.new_content);
+	if (!await vscode.workspace.applyEdit(edit)) {
+		throw new Error('VS Code declined the automatic edit.');
+	}
+};
+
+export const destory_timers = (timers: Map<string, TimeoutHandle>) => {
+	for (const timer of timers.values()) {
+		clearTimeout(timer);
+	}
+	timers.clear();
+};
+
+const  as_integer = (value: unknown): number | undefined => typeof value === 'number' && Number.isInteger(value) ? value : undefined;

@@ -4,15 +4,28 @@ import { ChangeTracker, getScopeKey } from './change_tracker';
 import { NotesManager } from './notes_manager';
 import { apiKeySecretKey, createProvider } from './providers';
 import { quality_exportCases, quality_handleCapture, quality_judgeLastCapture } from './quality';
-import { ReviewFunction, ReviewService } from './review_service';
+import { add_tool_event, destory_timers, ReviewFunction, run_review, TimeoutHandle } from './review_service';
 import { get_setting_or } from './settings';
+import { ReviewCapture } from './types';
+
+const dtor = (d: ()=>void) => {
+	return {
+		dispose: d
+	};
+};
 
 export function activate(context: vscode.ExtensionContext): void {
 	const change_tracker = new ChangeTracker(get_setting_or('coalesceWindow', 180));
 	const notes_manager = new NotesManager(context);
 
-	const review_service = new ReviewService(change_tracker, notes_manager, () => createProvider(context));
-	
+	const review_activeScopes = new Set<string>();
+	const review_fixTimers = new Map<string, TimeoutHandle>();
+	const review_captures = new Map<string, ReviewCapture>();
+
+	notes_manager.setToolEventHandler((event) => {
+		add_tool_event(review_captures, event);
+	});
+
 	const benchmark_status: BenchmarkStatus = {
 		lastResults: [],
 		running: false
@@ -22,8 +35,13 @@ export function activate(context: vscode.ExtensionContext): void {
 	const scopeKey_to_automaticTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	const scopeKey_to_lastAutomaticRuns = new Map<string, number>();
 
-	context.subscriptions.push(change_tracker, notes_manager, review_service, benchmark_output);
-	const review_function : ReviewFunction = async (uri, show) => await review_service.review(uri, show, (capture) => quality_handleCapture(context, capture));
+	context.subscriptions.push(change_tracker, notes_manager, dtor(() => destory_timers(review_fixTimers)), benchmark_output);
+	
+	const review_function : ReviewFunction = async (uri, show) => await run_review(
+		review_activeScopes, review_captures, change_tracker, notes_manager,
+		review_fixTimers, uri, show,
+		() => createProvider(context),
+		(capture) => quality_handleCapture(context, capture));
 
 	const find_openDocument_from_ScopeKey = (scopeKey: string): vscode.TextDocument | undefined =>
 		vscode.workspace.textDocuments.find((document) => getScopeKey(document.uri) === scopeKey);

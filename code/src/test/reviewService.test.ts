@@ -2,8 +2,8 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { ChangeTracker, getScopeKey } from '../change_tracker';
 import { NotesManager } from '../notes_manager';
-import { ReviewService } from '../review_service';
-import { ChatMessage, LlmProvider, ToolDefinition } from '../types';
+import { add_tool_event, destory_timers, run_review, TimeoutHandle } from '../review_service';
+import { ChatMessage, LlmProvider, ReviewCapture, ToolDefinition } from '../types';
 
 suite('Review service', () => {
 	test('runs note tools and marks a completed review as reviewed', async () => {
@@ -46,19 +46,26 @@ suite('Review service', () => {
 				};
 			},
 		};
-		const review_service = new ReviewService(tracker, notes, async () => provider);
+
+		const activeScopes = new Set<string>();
+		const fixTimers = new Map<string, TimeoutHandle>();
+		const captures = new Map<string, ReviewCapture>();
+		notes.setToolEventHandler((event) => {
+			add_tool_event(captures, event);
+		});
+
 		const edit = new vscode.WorkspaceEdit();
 		edit.replace(document.uri, new vscode.Range(0, 0, 0, 3), 'new');
 		try {
 			assert.strictEqual(await vscode.workspace.applyEdit(edit), true);
-			const capture = await review_service.review(document.uri, "hide_messages", undefined);
+			const capture = await run_review(activeScopes, captures, tracker, notes, fixTimers, document.uri, "hide_messages", async () => provider, undefined);
 			assert.ok(capture);
 			assert.strictEqual(capture.responses.length, 2);
 			assert.strictEqual(capture.toolEvents[0].tool, 'add_note');
 			assert.strictEqual(notes.list(getScopeKey(document.uri))[0].message, 'The value is incorrect.');
 			assert.strictEqual(tracker.getChanges(getScopeKey(document.uri)).length, 0);
 		} finally {
-			review_service.dispose();
+			destory_timers(fixTimers);
 			notes.dispose();
 			tracker.dispose();
 		}
