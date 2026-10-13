@@ -80,7 +80,7 @@
         },
         "llmBuddy.openAI.baseUrl": {
           "type": "string",
-          "default": "http://localhost:1234/v1",
+          "default": "http://localhost:1337/v1",
           "description": "Base URL for the OpenAI-compatible local server."
         },
         "llmBuddy.openAI.model": {

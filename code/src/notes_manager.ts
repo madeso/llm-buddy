@@ -39,10 +39,6 @@ export class NotesManager implements vscode.Disposable {
 		return this.notes.filter((note) => note.scopeKey === scopeKey);
 	}
 
-	private activeNotes(): ReviewNote[] {
-		return this.notes.filter((note) => note.status === 'active');
-	}
-
 	add(scopeKey: string, uri: vscode.Uri, line: number, message: string, severity: Severity): string {
 		const document = this.findDocument(uri.toString());
 		if (!document) {
@@ -69,7 +65,7 @@ export class NotesManager implements vscode.Disposable {
 	}
 
 	update(scopeKey: string, noteId: number, message: string): string {
-		const note = this.findInScope(scopeKey, noteId);
+		const note = findInScope(this.notes, scopeKey, noteId);
 		if (!note || note.status !== 'active') {
 			return `Active note ${noteId} was not found in this review scope.`;
 		}
@@ -82,7 +78,7 @@ export class NotesManager implements vscode.Disposable {
 	}
 
 	dismiss(scopeKey: string, noteId: number, reason = 'dismissed by user'): string {
-		const note = this.findInScope(scopeKey, noteId);
+		const note = findInScope(this.notes, scopeKey, noteId);
 		if (!note || note.status !== 'active') {
 			return `Active note ${noteId} was not found in this review scope.`;
 		}
@@ -123,10 +119,6 @@ export class NotesManager implements vscode.Disposable {
 		}
 		this.refreshDiagnostics();
 		this.persist();
-	}
-
-	private findInScope(scopeKey: string, noteId: number): ReviewNote | undefined {
-		return this.notes.find((note) => note.id === noteId && note.scopeKey === scopeKey);
 	}
 
 	private findDocument(uri: string): vscode.TextDocument | undefined {
@@ -228,3 +220,8 @@ export class NotesManager implements vscode.Disposable {
 		this.diagnostics.dispose();
 	}
 }
+
+
+const findInScope = (notes: ReviewNote[], scopeKey: string, noteId: number): ReviewNote | undefined  => {
+	return notes.find((note) => note.id === noteId && note.scopeKey === scopeKey);
+};

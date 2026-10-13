@@ -25,10 +25,14 @@ export const apiKeySecretKey = 'llmBuddy.openAI.apiKey';
 
 function getProviderConfiguration(): ProviderConfiguration {
 	const config = vscode.workspace.getConfiguration('llmBuddy');
+	const provider = config.get<string>('provider', 'openai-compatible');
+	const baseUrlVal = config.get<string | null>('openAI.baseUrl');
+	const baseUrl = baseUrlVal ?? 'http://localhost:1337/v1';
+	const model = config.get<string>('openAI.model', 'local-model');
 	return {
-		provider: config.get<string>('provider', 'openai-compatible'),
-		baseUrl: config.get<string>('openAI.baseUrl', 'http://localhost:1234/v1'),
-		model: config.get<string>('openAI.model', 'local-model'),
+		provider,
+		baseUrl,
+		model,
 	};
 }
 
