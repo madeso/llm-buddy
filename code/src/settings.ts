@@ -12,13 +12,29 @@ export type SettingsKey
 	| 'detectMinimum'
 	| 'fixUnreported'
 	| 'fixIdleDelay'
+	| 'openAI.baseUrl'
+	| 'openAI.model'
 	;
 
-export function get_setting_or<T>(name: SettingsKey, fallback: T): T {
-	return vscode.workspace.getConfiguration('llmBuddy').get<T>(name, fallback);
-}
+const config = () => vscode.workspace.getConfiguration('llmBuddy');
 
-export function rank_from_severity(severity: Severity): number {
+export const get_setting_or = <T>(name: SettingsKey, fallback: T): T => {
+	return config().get<T>(name, fallback);
+};
+
+export const set_setting_globally = async <T>(name: SettingsKey, value: T): Promise<void> => {
+	await config().update(name, value, vscode.ConfigurationTarget.Global);
+};
+
+export const save_setting = async <T>(name: SettingsKey, value: T): Promise<void> => {
+	if(get_setting_or(name, value) === value)
+	{
+		return;
+	}
+	await set_setting_globally(name, value);
+};
+
+export const rank_from_severity = (severity: Severity): number => {
 	switch (severity) {
 		case 'trivial':
 			return 0;
@@ -27,8 +43,8 @@ export function rank_from_severity(severity: Severity): number {
 		case 'critical':
 			return 2;
 	}
-}
+};
 
-export function is_severity(value: unknown): value is Severity {
+export const is_severity = (value: unknown): value is Severity => {
 	return value === 'trivial' || value === 'significant' || value === 'critical';
-}
+};

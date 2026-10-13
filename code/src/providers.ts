@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { ChatMessage, LlmProvider, ProviderResponse, ToolDefinition, ToolCall } from './types';
+import { get_setting_or } from './settings';
 
 interface ProviderConfiguration {
 	provider: string;
@@ -24,11 +25,9 @@ interface OpenAiResponse {
 export const apiKeySecretKey = 'llmBuddy.openAI.apiKey';
 
 function getProviderConfiguration(): ProviderConfiguration {
-	const config = vscode.workspace.getConfiguration('llmBuddy');
-	const provider = config.get<string>('provider', 'openai-compatible');
-	const baseUrlVal = config.get<string | null>('openAI.baseUrl');
-	const baseUrl = baseUrlVal ?? 'http://localhost:1337/v1';
-	const model = config.get<string>('openAI.model', 'local-model');
+	const provider = get_setting_or<string>('provider', 'openai-compatible');
+	const baseUrl = get_setting_or<string>('openAI.baseUrl', 'http://localhost:1337/v1');
+	const model = get_setting_or<string>('openAI.model', 'local-model');
 	return {
 		provider,
 		baseUrl,

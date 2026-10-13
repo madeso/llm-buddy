@@ -5,7 +5,7 @@ import { NotesManager } from './notes_manager';
 import { apiKeySecretKey, createProvider } from './providers';
 import { quality_exportCases, quality_handleCapture, quality_judgeLastCapture } from './quality';
 import { add_tool_event, destory_timers, ReviewFunction, run_review, TimeoutHandle } from './review_service';
-import { get_setting_or } from './settings';
+import { get_setting_or, save_setting, set_setting_globally } from './settings';
 import { ReviewCapture } from './types';
 
 const dtor = (d: ()=>void) => {
@@ -82,6 +82,24 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	}));
 
+	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.setup', async () => {
+		const select = async (prompt: string, value: string) => await vscode.window.showInputBox({
+			prompt,
+			value
+		});
+		const url = await select("Server", get_setting_or("openAI.baseUrl", ""));
+		if(url === undefined)
+		{
+			return;
+		}
+		const model = await select("Model", get_setting_or("openAI.model", ""));
+		if(model === undefined)
+		{
+			return;
+		}
+		vscode.window.showInformationMessage(`Got: ${url} and ${model}`);
+	}));
+
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.reviewChanges', async () => {
 		const editor = vscode.window.activeTextEditor;
 		if (!editor) {
@@ -111,9 +129,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		notes_manager.dismissAll();
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.toggleAutomaticReview', async () => {
-		const config = vscode.workspace.getConfiguration('llmBuddy');
 		const enabled = !get_setting_or('enabled', false);
-		await config.update('enabled', enabled, vscode.ConfigurationTarget.Global);
+		await set_setting_globally('enabled', enabled);
 		vscode.window.showInformationMessage(`llm-buddy automatic review ${enabled ? 'enabled' : 'disabled'}.`);
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.setApiKey', async () => {
@@ -134,9 +151,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.toggleQualityCapture', async () => {
-		const config = vscode.workspace.getConfiguration('llmBuddy');
 		const enabled = !get_setting_or('captureQualityData', false);
-		await config.update('captureQualityData', enabled, vscode.ConfigurationTarget.Global);
+		await set_setting_globally('captureQualityData', enabled);
 		vscode.window.showInformationMessage(`llm-buddy quality capture ${enabled ? 'enabled' : 'disabled'}.`);
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.judgeLastReview', () => quality_judgeLastCapture(context)));

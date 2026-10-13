@@ -16,6 +16,10 @@
   "contributes": {
     "commands": [
       {
+        "command": "llmBuddy.setup",
+        "title": "llm-buddy: Setup"
+      },
+      {
         "command": "llmBuddy.reviewChanges",
         "title": "llm-buddy: Review Recent Changes"
       },
