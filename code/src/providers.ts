@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ChatMessage, LlmProvider, ProviderResponse, ToolDefinition, ToolCall } from './types';
+import { ChatMessage, LlmProvider, ProviderResponse, ToolDefinition, ToolCall, ModelResponse } from './types';
 import { get_setting_or } from './settings';
 
 interface ProviderConfiguration {
@@ -94,6 +94,41 @@ export class OpenAiCompatibleProvider implements LlmProvider {
 			},
 		};
 	}
+
+	async models(
+		signal?: AbortSignal,
+	): Promise<ModelResponse> {
+		const url = `${this.baseUrl.replace(/\/+$/, '')}/models`;
+		const headers: Record<string, string> = { };
+		if (this.apiKey) {
+			headers.Authorization = `Bearer ${this.apiKey}`;
+		}
+
+		const response = await fetch(url, {
+			method: 'GET',
+			headers,
+			signal,
+		});
+		const body = await response.json();
+
+		if(typeof body !== 'object') { throw new Error("Missing body in response"); }
+		if(body === null) { throw new Error("body is null"); }
+
+		const data = 'data' in body ? body.data : undefined;
+		if(Array.isArray(data) === false) { throw new Error("data is not an array"); }
+
+		const ret = data.map( (x: unknown) => {
+			if(typeof x !== 'object') { return null; }
+			if(x === null) { return null; }
+			
+			const id = 'id' in x ? x.id : undefined;
+			if(typeof id !== 'string') { return null; }
+
+			return {id};
+		});
+		
+		return ret.filter(x => x !== null) ;
+	}
 }
 
 export class VsCodeLanguageModelProvider implements LlmProvider {
@@ -102,6 +137,12 @@ export class VsCodeLanguageModelProvider implements LlmProvider {
 		_tools: ToolDefinition[],
 		_signal?: AbortSignal,
 	): Promise<ProviderResponse> {
+		throw new Error('VS Code Language Model provider is not implemented yet.');
+	}
+
+	async models(
+		_signal?: AbortSignal,
+	): Promise<ModelResponse> {
 		throw new Error('VS Code Language Model provider is not implemented yet.');
 	}
 }

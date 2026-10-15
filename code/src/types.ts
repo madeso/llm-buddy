@@ -86,10 +86,20 @@ export interface ProviderResponse {
 	message: ChatMessage;
 }
 
+export interface SingleModel {
+	id: string;
+}
+
+export type ModelResponse = SingleModel[];
+
 export interface LlmProvider {
 	complete(
 		messages: ChatMessage[],
 		tools: ToolDefinition[],
 		signal?: AbortSignal,
 	): Promise<ProviderResponse>;
+
+	models(
+		signal?: AbortSignal,
+	): Promise<ModelResponse>;
 }

@@ -83,20 +83,32 @@ export function activate(context: vscode.ExtensionContext): void {
 	}));
 
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.setup', async () => {
-		const select = async (prompt: string, value: string) => await vscode.window.showInputBox({
-			prompt,
-			value
+		const url = await vscode.window.showInputBox({
+			prompt: 'Enter local server',
+			value: get_setting_or("openAI.baseUrl", "")
 		});
-		const url = await select("Server", get_setting_or("openAI.baseUrl", ""));
-		if(url === undefined)
-		{
+		if(url === undefined) {
 			return;
 		}
-		const model = await select("Model", get_setting_or("openAI.model", ""));
-		if(model === undefined)
-		{
+
+		// todo(Gustav): use entered url!
+		const provider = await createProvider(context);
+		const models = await provider.models();
+		if(models.length === 0) {
+			vscode.window.showErrorMessage(`No models detected on ${url}`);
 			return;
 		}
+
+		const model = models.length === 1
+			? models[0].id
+			: await vscode.window.showQuickPick(models.map(x => x.id), {
+				prompt: 'Select model',
+			});
+		if(model === undefined) {
+			return;
+		}
+
+		// todo(Gustav): save settings
 		vscode.window.showInformationMessage(`Got: ${url} and ${model}`);
 	}));
 

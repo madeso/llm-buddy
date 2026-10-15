@@ -21,6 +21,10 @@ suite('Review service', () => {
 		const notes_manager = new NotesManager({ workspaceState });
 		let responseIndex = 0;
 		const provider: LlmProvider = {
+			async models() {
+				throw new Error('Not implemetned in test.');
+			},
+			
 			async complete(_messages: ChatMessage[], _tools: ToolDefinition[]) {
 				const toolCall = responseIndex++ === 0
 					? {
