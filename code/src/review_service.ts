@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { ChangeTracker, getScopeDescription, getScopeKey } from './change_tracker';
 import { createNumberedDiff, reconstructOriginal } from './diff';
 import { NotesManager } from './notes_manager';
-import { get_setting_or, is_severity, rank_from_severity } from './settings';
+import { get_ai_provider_setting, get_setting_or, is_severity, rank_from_severity } from './settings';
 import {
 	ChatMessage,
 	ChangeChunk,
@@ -215,7 +215,7 @@ export const run_review = async (
 	this_captures.set(scopeKey, capture);
 	try {
 		const provider = await this_providerFactory();
-		capture.provider = get_setting_or('provider', 'openai-compatible');
+		capture.provider = get_ai_provider_setting()[1];
 		await runConversation(notes_manager, this_tracker, provider, scopeKey, changes, diff, reviewedRevision, capture,
 			args => scheduleFix(this_fixTimers, this_providerFactory, this_tracker, args.chunk_uri, args.line_number, args.note)
 		);

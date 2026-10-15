@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
 import { ChatMessage, LlmProvider, ProviderResponse, ToolDefinition, ToolCall, ModelResponse } from './types';
-import { get_setting_or } from './settings';
+import { AiProvider, AllAiProviders, get_ai_provider_setting, get_setting_or } from './settings';
 
-interface ProviderConfiguration {
-	provider: string;
+export interface LlmConfig {
+	provider: AiProvider;
 	baseUrl: string;
 	model: string;
 }
@@ -24,16 +24,19 @@ interface OpenAiResponse {
 
 export const apiKeySecretKey = 'llmBuddy.openAI.apiKey';
 
-function getProviderConfiguration(): ProviderConfiguration {
-	const provider = get_setting_or<string>('provider', 'openai-compatible');
+export const LlmConfig_from_settings = (): LlmConfig => {
+	const [provider, providerString] = get_ai_provider_setting();
 	const baseUrl = get_setting_or<string>('openAI.baseUrl', 'http://localhost:1337/v1');
 	const model = get_setting_or<string>('openAI.model', 'local-model');
+	if(provider === null) {
+		throw new Error(`${providerString} is not a valid provider, valid values are ${AllAiProviders}`);
+	}
 	return {
 		provider,
 		baseUrl,
 		model,
 	};
-}
+};
 
 export class OpenAiCompatibleProvider implements LlmProvider {
 	constructor(
@@ -147,8 +150,7 @@ export class VsCodeLanguageModelProvider implements LlmProvider {
 	}
 }
 
-export async function createProvider(context: vscode.ExtensionContext): Promise<LlmProvider> {
-	const settings = getProviderConfiguration();
+export async function createLlm(settings: LlmConfig, context: vscode.ExtensionContext): Promise<LlmProvider> {
 	switch (settings.provider) {
 		case 'openai-compatible':
 			return new OpenAiCompatibleProvider(
@@ -158,7 +160,5 @@ export async function createProvider(context: vscode.ExtensionContext): Promise<
 			);
 		case 'vscode-language-model':
 			return new VsCodeLanguageModelProvider();
-		default:
-			throw new Error(`Unknown llmBuddy.provider value: ${settings.provider}`);
 	}
 }

@@ -27,7 +27,7 @@ export interface NoteToolEvent {
 
 export interface ReviewCapture {
 	scopeKey: string;
-	provider: string;
+	provider: string; // todo(Gustav): change to a proper type
 	startedAt: number;
 	finishedAt?: number;
 	diff: string;

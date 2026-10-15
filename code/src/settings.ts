@@ -16,6 +16,21 @@ export type SettingsKey
 	| 'openAI.model'
 	;
 
+export type AiProvider = 'openai-compatible' | 'vscode-language-model';
+export const AllAiProviders: AiProvider[] = ['openai-compatible', 'vscode-language-model'];
+
+export const AiProvider_from_string = (s: string): AiProvider | null => {
+	const x = (x: string) => x.toLowerCase().trim();
+	const found = AllAiProviders.find(prov => x(prov) === x(s));
+	return found ?? null;
+};
+
+export const get_ai_provider_setting = () : [AiProvider | null, string] => {
+	const string = get_setting_or('provider', 'openai-compatible');
+	const provider = AiProvider_from_string(string);
+	return [provider, string];
+};
+
 const config = () => vscode.workspace.getConfiguration('llmBuddy');
 
 export const get_setting_or = <T>(name: SettingsKey, fallback: T): T => {

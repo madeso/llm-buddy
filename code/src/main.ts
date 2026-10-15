@@ -2,10 +2,10 @@ import * as vscode from 'vscode';
 import { benchmark_exportHtmlReport, benchmark_exportReport, benchmark_run, BenchmarkStatus } from './benchmark_service';
 import { ChangeTracker, getScopeKey } from './change_tracker';
 import { NotesManager } from './notes_manager';
-import { apiKeySecretKey, createProvider } from './providers';
+import { apiKeySecretKey, createLlm, LlmConfig_from_settings } from './providers';
 import { quality_exportCases, quality_handleCapture, quality_judgeLastCapture } from './quality';
 import { add_tool_event, destory_timers, ReviewFunction, run_review, TimeoutHandle } from './review_service';
-import { get_setting_or, save_setting, set_setting_globally } from './settings';
+import { AiProvider_from_string, AllAiProviders, get_setting_or, save_setting, set_setting_globally } from './settings';
 import { ReviewCapture } from './types';
 
 const dtor = (d: ()=>void) => {
@@ -40,7 +40,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	const review_function : ReviewFunction = async (uri, show) => await run_review(
 		review_activeScopes, review_captures, change_tracker, notes_manager,
 		review_fixTimers, uri, show,
-		() => createProvider(context),
+		() => createLlm(LlmConfig_from_settings(), context),
 		(capture) => quality_handleCapture(context, capture));
 
 	const find_openDocument_from_ScopeKey = (scopeKey: string): vscode.TextDocument | undefined =>
@@ -83,6 +83,18 @@ export function activate(context: vscode.ExtensionContext): void {
 	}));
 
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.setup', async () => {
+		const providerString = await vscode.window.showQuickPick(AllAiProviders, {
+			prompt: 'Select provider'
+		});
+		if(providerString === undefined) {
+			return;
+		}
+		const provider = AiProvider_from_string(providerString);
+		if(provider === null) {
+			vscode.window.showErrorMessage(`Invalid provider entered ${providerString}`);
+			return;
+		}
+
 		const url = await vscode.window.showInputBox({
 			prompt: 'Enter local server',
 			value: get_setting_or("openAI.baseUrl", "")
@@ -91,9 +103,8 @@ export function activate(context: vscode.ExtensionContext): void {
 			return;
 		}
 
-		// todo(Gustav): use entered url!
-		const provider = await createProvider(context);
-		const models = await provider.models();
+		const llm = await createLlm({provider, baseUrl: url, model: 'model-not-yet-selected'}, context);
+		const models = await llm.models();
 		if(models.length === 0) {
 			vscode.window.showErrorMessage(`No models detected on ${url}`);
 			return;
