@@ -240,6 +240,7 @@ export const run_review = async (
 		captureHandler?.(capture);
 		this_captures.delete(capture.scopeKey);
 	}
+	vscode.window.showInformationMessage(`llm-buddy finished review: ${capture.notes.length} note(s)`);
 	return capture;
 };
 
