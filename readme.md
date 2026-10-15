@@ -18,3 +18,5 @@ This is heavily inspired/fork of the original [llm-buddy project for emacs](http
 * [Back-seat driver](https://en.wikipedia.org/wiki/Back-seat_driver) - a passenger in a vehicle who is not controlling the vehicle but who comments on and/or criticizes the driver's actions and decisions.
 * [Umarell](https://en.wikipedia.org/wiki/Umarell) - men of retirement age who spend their time watching construction sites /.../ offering unrequested advice
 
+### AI disclaimer
+A LLM (copilot) was used for the initial porting from emacs to vs-code as transformers should be pretty ok and I don't know anything about emacs and emacs scripting.
