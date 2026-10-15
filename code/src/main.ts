@@ -119,8 +119,11 @@ export function activate(context: vscode.ExtensionContext): void {
 			return;
 		}
 
-		// todo(Gustav): save settings
-		vscode.window.showInformationMessage(`Got: ${url} and ${model}`);
+		save_setting("provider", provider);
+		save_setting("openAI.baseUrl", url);
+		save_setting("openAI.model", model);
+		
+		vscode.window.showInformationMessage(`Saved settings ${model} via ${url}`);
 	}));
 
 	context.subscriptions.push(vscode.commands.registerCommand('llmBuddy.reviewChanges', async () => {
